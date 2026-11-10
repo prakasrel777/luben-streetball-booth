@@ -17,6 +17,7 @@ The video booth for the touch screen at the Luben Streetball 1vs1 event (Σάβ�
 | RGB Ghost | 4× smooth slow motion with magenta and red full-frame ghosts | none |
 | Jittery Sticker | Colour video; at the hit the background goes B&W and the player jitters as a sticker | RVM |
 | Flame Outline | The player is engulfed in procedural fire (brand or natural colours) | RVM |
+| Player Card | Freeze on a still pose; a card builds around it with a court texture from the animation, magenta graphics, the player again huge behind, the logo and «KING OF THE COURT?» | RVM |
 
 ## Tech
 - Matting uses **Robust Video Matting** (MobileNetV3, ONNX). It runs through onnxruntime-web on WASM/CPU. The model is in `rvm_model.js`, base64-encoded so it also works from `file://`.

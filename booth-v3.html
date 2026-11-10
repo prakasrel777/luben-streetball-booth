@@ -77,7 +77,7 @@ canvas#view{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;di
 .ic.r{background:linear-gradient(90deg,var(--mag) 0 33%,var(--red) 33% 66%,#fff 66%)}
 .ic.s{background:var(--mag);box-shadow:inset 0 0 0 .7cqh #fff;transform:rotate(-7deg)}
 .ic.f{background:radial-gradient(ellipse 45% 70% at 50% 100%,#fff 0 18%,var(--red) 40%,var(--mag) 65%,#3a0020 90%)}
-.fbtn.wide{grid-column:1/-1;justify-self:center;width:calc(50% - 1.2cqw)}
+.ic.c{background:linear-gradient(135deg,var(--mag) 0 40%,#111 40% 60%,var(--red) 60%);box-shadow:inset 0 0 0 .4cqh #fff}
 
 .go{position:absolute;left:50%;bottom:4cqh;transform:translateX(-50%);white-space:nowrap;font:italic 900 3.6cqh/1 var(--cond);letter-spacing:.04em;padding:1.4cqh 10cqw;border:0;border-radius:99px;background:var(--grad);color:#fff;cursor:pointer;box-shadow:0 1cqh 3cqh rgba(230,0,126,.5);animation:pulse 1.6s ease-in-out infinite}
 .go:disabled{background:#2a2630;color:var(--mute);box-shadow:none;animation:none;cursor:default}
@@ -157,7 +157,8 @@ button:focus-visible{outline:2px solid #fff;outline-offset:2px}
     <button class="fbtn" data-f="quake"><span class="ic q"></span><b>Earthquake<br>Echo</b></button>
     <button class="fbtn" data-f="rgb"><span class="ic r"></span><b>RGB<br>Ghost</b></button>
     <button class="fbtn" data-f="sticker"><span class="ic s"></span><b>Jittery<br>Sticker</b></button>
-    <button class="fbtn wide" data-f="flame"><span class="ic f"></span><b>Flame<br>Outline</b></button>
+    <button class="fbtn" data-f="flame"><span class="ic f"></span><b>Flame<br>Outline</b></button>
+    <button class="fbtn" data-f="card"><span class="ic c"></span><b>Player<br>Card</b></button>
   </div>
   <button class="go" id="go" disabled>● ΠΑΜΕ</button>
 
@@ -218,6 +219,7 @@ button:focus-visible{outline:2px solid #fff;outline-offset:2px}
 
 <script src="assets/logo_data.js"></script>
 <script src="assets/balls_data.js"></script>
+<script src="assets/court_data.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script type="module">
 const $ = s => document.querySelector(s);
@@ -232,6 +234,7 @@ const CFG = {
   rgb:     {name:'RGB GHOST',       freeze:false, slow:4},     // no freeze: 4× smooth slow motion, effect on from the start
   sticker: {name:'JITTERY STICKER', freeze:true},
   flame:   {name:'FLAME OUTLINE',   freeze:false},
+  card:    {name:'PLAYER CARD',     freeze:true, hold:84, speed:1},   // video at normal speed, then the card builds on a still pose
 };
 const S = {filter:null, freezeMode:'auto', intensity:1, hold:45, rot:0, res:384, dur:3, speed:.5,
            feather:1.5, choke:.15, temporal:.35, flamePal:'brand'};
@@ -289,6 +292,7 @@ function reset(){ outFrames = []; S.filter = null; document.querySelectorAll('.f
 let playI = 0, playT = 0, recT0 = 0;
 function loop(t){
   requestAnimationFrame(loop);
+  if(window.__hold != null && outFrames.length){ vctx.drawImage(outFrames[window.__hold].b, 0, 0); return; }
   if(state==='result' && outFrames.length){
     const f = outFrames[playI];
     if(t - playT >= f.ms){ playT = t; vctx.drawImage(f.b, 0, 0); playI = (playI+1) % outFrames.length; }
@@ -381,7 +385,7 @@ async function rvmAlpha(canvas){
 }
 
 // only these filters cut the player out; Earthquake and RGB work on the whole frame (no matting → fast)
-const NEEDS_MASK = {ghost:true, sticker:true, flame:true, quake:true};
+const NEEDS_MASK = {ghost:true, sticker:true, flame:true, quake:true, card:true};
 async function processAll(newClip){
   if(!frames.length) return;
   setState('proc');
@@ -514,11 +518,14 @@ async function composeAll(p0){
   const X = {masks, cuts, rings, N, cache:{}};
   const freeze = S.freezeMode==='on' || (S.freezeMode==='auto' && CFG[S.filter].freeze);
   const tl = [];
-  const vidMs = 1000/capFps/S.speed, fxMs = 1000/30;
+  const vidMs = 1000/capFps/(CFG[S.filter].speed || S.speed), fxMs = 1000/30;
+  X.seed = 1 + Math.floor(Math.random()*1e6);                    // new fake stats / layout noise per capture
+  if(S.filter==='card') try{ await document.fonts.load(`italic 900 40px 'Fira Sans Extra Condensed'`); await document.fonts.load(`italic 800 20px 'Fira Sans Extra Condensed'`); }catch(err){}
   if(freeze){
-    const fp = peakFrame();
+    const fp = S.filter==='card' ? calmFrame() : peakFrame();
     for(let i=0;i<fp;i++) tl.push({i, t:-1, ms:vidMs});
-    for(let k=0;k<S.hold;k++) tl.push({i:fp, t:k, ms:fxMs, freeze:true});
+    const hold = CFG[S.filter].hold || S.hold;
+    for(let k=0;k<hold;k++) tl.push({i:fp, t:k, ms:fxMs, freeze:true});
   } else if(CFG[S.filter].slow){
     // strong, smooth slow motion: n in-between frames per captured frame, played at normal rate
     const n = CFG[S.filter].slow; let k = 0;
@@ -528,6 +535,7 @@ async function composeAll(p0){
   }
   if(S.filter==='ghost') X.ghost = ghostState();
   if(S.filter==='flame') X.fire = fireState();
+  window.__tl = tl;
   const out = mk(CW,CH), o = out.getContext('2d');
   outFrames = [];
   for(let k=0;k<tl.length;k++){
@@ -535,8 +543,8 @@ async function composeAll(p0){
     o.setTransform(1,0,0,1,0,0); o.globalAlpha=1; o.globalCompositeOperation='source-over'; o.filter='none';
     o.fillStyle='#000'; o.fillRect(0,0,CW,CH);
     if(e.t < 0) renderPlain(o, X, e);
-    else ({ghost:renderGhost, quake:renderQuake, rgb:renderRGB, sticker:renderSticker, flame:renderFlame})[S.filter](o, X, e);
-    burnLogo(o);
+    else ({ghost:renderGhost, quake:renderQuake, rgb:renderRGB, sticker:renderSticker, flame:renderFlame, card:renderCard})[S.filter](o, X, e);
+    if(!(S.filter==='card' && e.t >= 0)) burnLogo(o);           // the card carries the logo in its plate
     outFrames.push({b: await createImageBitmap(out), ms: e.ms});
     if(k%4===0){ progress('Γίνεσαι viral…', p0 + (1-p0)*(.3 + .7*(k+1)/tl.length)); await wait(0); }
   }
@@ -746,6 +754,147 @@ function renderFlame(o, X, e){
   o.save(); o.globalCompositeOperation = 'screen'; o.filter = 'blur(.5px)'; o.drawImage(F.frontC,0,0,CW,CH); o.restore();
 }
 
+/* 5 · PLAYER CARD — the clip freezes on a clean pose and a "King of the Court" trading card builds around it.
+   Layers: black base + magenta spray + dry-brush strokes + chalk court → the player again, huge, magenta duotone + halftone
+   → sketch lines → the player in colour → card frame → name plate (event logo + STREETBALL PLAYER). */
+const CARD_FONT = "'Fira Sans Extra Condensed','Arial Narrow',Impact,sans-serif";
+function cardRand(seed){ let s = seed % 2147483647 || 1; return () => (s = s*16807 % 2147483647) / 2147483647; }
+const COURT_IMG = (() => { const im = new Image(); if(window.COURT_URI) im.src = window.COURT_URI; return im; })();
+// card background in the promo's language: dark B&W court floor (our animation texture), magenta diagonal slab,
+// magenta spray bursts, white "energy" squiggles
+function cardBase(X){
+  if(X.cardBase) return X.cardBase;
+  const c = mk(CW,CH), x = c.getContext('2d'), R = cardRand(X.seed);
+  x.fillStyle = '#0b0a0d'; x.fillRect(0,0,CW,CH);
+  if(COURT_IMG.complete && COURT_IMG.naturalWidth) x.drawImage(COURT_IMG, 0, 0, CW, CH);
+  // magenta slab across the upper card, diagonal edges like the promo wipes
+  x.save(); x.fillStyle = MAG;
+  x.beginPath(); x.moveTo(-10, 150); x.lineTo(CW+10, -40); x.lineTo(CW+10, 230); x.lineTo(-10, 420); x.closePath(); x.fill();
+  // dry edge on the slab
+  x.globalCompositeOperation = 'destination-out';
+  for(let k=0;k<900;k++){ const u = R(); const ex = -10 + u*(CW+20), ey = 150 - u*190 + (R()-.5)*16; x.globalAlpha = R()*.8; x.beginPath(); x.arc(ex, ey, .5+R()*2.2, 0, 7); x.fill(); }
+  x.restore();
+  // spray bursts
+  for(const [cx, cy, r] of [[CW*.95, CH*.06, 210], [CW*.02, CH*.62, 170]]){
+    const g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, 'rgba(230,0,126,.6)'); g.addColorStop(1, 'rgba(230,0,126,0)');
+    x.fillStyle = g; x.fillRect(0,0,CW,CH);
+    for(let k=0;k<1500;k++){
+      const ang = R()*Math.PI*2, d = Math.pow(R(),.6)*r*1.2;
+      x.globalAlpha = (1 - d/(r*1.2))*.85*R(); x.fillStyle = MAG;
+      x.beginPath(); x.arc(cx + Math.cos(ang)*d, cy + Math.sin(ang)*d, R() < .04 ? 2+R()*3 : .4+R()*1.1, 0, 7); x.fill();
+    }
+    x.globalAlpha = 1;
+  }
+  // white energy squiggles radiating around where the head/shoulders sit
+  x.save(); x.strokeStyle = 'rgba(255,255,255,.85)'; x.lineCap = 'round'; x.lineJoin = 'round';
+  for(let k=0;k<9;k++){
+    const ang = -Math.PI*.95 + k*(Math.PI*.9/8) + (R()-.5)*.15, r0 = 150 + R()*30, len = 34 + R()*40;
+    const cx = CW/2, cy = CH*.36;
+    x.lineWidth = 2 + R()*1.6; x.beginPath();
+    for(let s=0;s<=10;s++){
+      const rr = r0 + s/10*len, wob = Math.sin(s*1.9 + k)*5;
+      const px = cx + Math.cos(ang)*rr - Math.sin(ang)*wob, py = cy + Math.sin(ang)*rr + Math.cos(ang)*wob;
+      s ? x.lineTo(px, py) : x.moveTo(px, py);
+    }
+    x.stroke();
+  }
+  x.restore();
+  return X.cardBase = c;
+}
+function halftone(w, h, step){
+  const c = mk(w,h), x = c.getContext('2d');
+  x.fillStyle = '#000';
+  for(let y=0;y<h;y+=step) for(let i=0;i<w;i+=step){ x.beginPath(); x.arc(i + (y/step%2)*step/2, y, step*.32, 0, 7); x.fill(); }
+  return c;
+}
+function cardBack(X, i){
+  if(X.cardBack) return X.cardBack;
+  const c = mk(CW,CH), x = c.getContext('2d');
+  x.drawImage(duoOf(X.cuts[i], MAG), 0, 0);
+  x.globalCompositeOperation = 'destination-out'; x.globalAlpha = .45;
+  x.drawImage(X.dots || (X.dots = halftone(CW, CH, 6)), 0, 0);
+  x.globalAlpha = 1; x.globalCompositeOperation = 'source-over';
+  return X.cardBack = c;
+}
+function cardStats(X){
+  if(X.stats) return X.stats;
+  const R = cardRand(X.seed*7 + 3), r = (a, b) => Math.round(a + R()*(b-a));
+  return X.stats = {
+    ovr: r(86, 99),
+    rows: [['ΠΟΝΤΟΙ', r(18, 38), ''], ['ΕΥΣΤΟΧΙΑ', r(46, 71), '%'], ['ΤΡΙΠΟΝΤΑ', r(33, 52), '%'],
+           ['ΡΙΜΠΑΟΥΝΤ', r(4, 14), ''], ['ΑΣΙΣΤ', r(3, 12), ''], ['ΚΛΕΨΙΜΑΤΑ', r(1, 6), '']],
+  };
+}
+const ease = v => v <= 0 ? 0 : v >= 1 ? 1 : 1 - Math.pow(1-v, 3);
+function plate(x, pts){ x.beginPath(); pts.forEach(([a,b], k) => k ? x.lineTo(a,b) : x.moveTo(a,b)); x.closePath(); }
+function renderCard(o, X, e){
+  const t = e.t, i = e.i;
+  const pop = ease(t/6), backIn = ease((t-3)/10), plateIn = ease((t-8)/9), count = ease((t-12)/16);
+  o.save();
+  // whole card slams in
+  const sc = 1.12 - .12*pop;
+  o.translate(CW/2, CH/2); o.scale(sc, sc); o.rotate((1-pop)*.04); o.translate(-CW/2, -CH/2);
+  o.drawImage(cardBase(X), 0, 0);
+  // the player again, huge and behind
+  const drift = Math.sin(t*.05)*4;
+  o.save(); o.globalAlpha = .6*backIn;
+  o.translate(CW/2, CH*.36 + drift); o.scale(1.55 + .1*(1-backIn), 1.55 + .1*(1-backIn)); o.translate(-CW/2, -CH/2);
+  o.drawImage(cardBack(X, i), 0, 0); o.restore();
+  // sketch lines (white, thin, angular)
+  o.save(); o.strokeStyle = 'rgba(255,255,255,.55)'; o.lineWidth = 1.1; o.globalAlpha = backIn;
+  const R = cardRand(X.seed + 11);
+  for(let k=0;k<7;k++){ o.beginPath(); let px = R()*CW, py = R()*CH*.7; o.moveTo(px, py); for(let s=0;s<4;s++){ px += (R()-.5)*160; py += (R()-.3)*120; o.lineTo(px, py); } o.stroke(); }
+  o.restore();
+  // the player in colour, with a magenta glow behind
+  o.save(); o.translate(0, CH*.04);
+  o.filter = 'drop-shadow(0 0 14px rgba(230,0,126,.65))'; o.drawImage(X.cuts[i], 0, 0); o.filter = 'none';
+  o.filter = 'contrast(1.12) saturate(1.15)'; o.drawImage(X.cuts[i], 0, 0); o.filter = 'none';
+  o.restore();
+  // card frame: white edge, magenta inner line, notched corners, pixel glitch on the edges
+  o.save();
+  o.strokeStyle = '#fff'; o.lineWidth = 7;
+  plate(o, [[10,30],[30,10],[CW-10,10],[CW-10,CH-30],[CW-30,CH-10],[10,CH-10]]); o.stroke();
+  o.strokeStyle = MAG; o.lineWidth = 2;
+  plate(o, [[20,36],[36,20],[CW-20,20],[CW-20,CH-36],[CW-36,CH-20],[20,CH-20]]); o.stroke();
+  const G = cardRand(X.seed + 5);
+  for(let k=0;k<70;k++){
+    const side = k%4, s = 3 + G()*7, along = G();
+    const px = side===0 ? along*CW : side===1 ? CW-14+G()*8 : side===2 ? along*CW : 6+G()*8;
+    const py = side===0 ? 6+G()*8 : side===1 ? along*CH : side===2 ? CH-14+G()*8 : along*CH;
+    o.fillStyle = G() < .5 ? '#fff' : '#0b0a0d'; o.fillRect(px, py, s, s);
+  }
+  o.restore();
+  // name plate slides up: event logo + "LUBEN STREETBALL PLAYER" over the big question "KING OF THE COURT?"
+  o.save(); o.translate(0, (1-plateIn)*220); o.globalAlpha = plateIn;
+  const P = [[22,642],[42,620],[292,620],[308,634],[410,634],[410,722],[390,742],[22,742]];
+  o.fillStyle = 'rgba(12,10,14,.94)'; plate(o, P); o.fill();
+  o.strokeStyle = MAG; o.lineWidth = 2.5; plate(o, P); o.stroke();
+  o.strokeStyle = 'rgba(255,255,255,.35)'; o.lineWidth = 1;
+  plate(o, [[30,646],[46,628],[288,628],[304,642],[402,642],[402,718],[386,734],[30,734]]); o.stroke();
+  if(logoImg.complete && logoImg.naturalWidth){ const w = 104, h = w*logoImg.naturalHeight/logoImg.naturalWidth; o.drawImage(logoImg, 30, 682 - h/2, w, h); }
+  o.textBaseline = 'alphabetic';
+  o.fillStyle = '#fff'; o.font = `italic 900 40px ${CARD_FONT}`; o.fillText('KING OF THE', 146, 676);
+  o.fillStyle = MAG; o.font = `italic 900 58px ${CARD_FONT}`; o.fillText('COURT?', 142, 728);
+  // sheared magenta tag on the plate's top edge (like the site's "ΤΟ ΑΠΟΛΥΤΟ ΜΟΝΑΚΙ CHALLENGE")
+  o.fillStyle = MAG; plate(o, [[206,598],[412,598],[404,628],[198,628]]); o.fill();
+  o.fillStyle = '#fff'; o.font = `italic 900 19px ${CARD_FONT}`; o.textAlign = 'center';
+  o.fillText('LUBEN STREETBALL PLAYER', 305, 620); o.textAlign = 'left';
+  o.restore();
+  o.restore();
+  if(t < 3){ o.fillStyle = `rgba(255,255,255,${[.75,.35,.1][t]})`; o.fillRect(0,0,CW,CH); }
+}
+// the card needs a clean, still pose: least movement in the second half of the clip
+function calmFrame(){
+  let best = alphas.length-1, bestV = Infinity;
+  for(let i=Math.floor(alphas.length*.5); i<alphas.length; i++){
+    const A = alphas[i].a, B = alphas[i-1].a; let v = 0;
+    for(let j=0;j<A.length;j+=7) v += Math.abs(A[j]-B[j]);
+    if(v < bestV){ bestV = v; best = i; }
+  }
+  return best;
+}
+
 /* ---------- save (demo only) ---------- */
 async function save(){
   if(!outFrames.length) return;
@@ -797,6 +946,22 @@ setState('idle');
 // test hook: booth-v3.html?auto=quake picks the filter and records on its own
 const auto = new URLSearchParams(location.search).get('auto');
 if(auto && CFG[auto]) setTimeout(() => { document.querySelector(`.fbtn[data-f="${auto}"]`).click(); capture(); }, 1500);
+// test hook: ?still=1&f=card&t=40 → runs a still photo (test_still.js, not in the repo) through a filter and shows frame t of the effect
+const QP = new URLSearchParams(location.search);
+if(QP.get('still')) loadScript('test_still.js').then(() => {
+  const im = new Image();
+  im.onload = async () => {
+    const g = grabC.getContext('2d'); frames = [];
+    for(let k=0;k<12;k++){ const sc = Math.max(CW/im.width, CH/im.height); g.drawImage(im, (CW-im.width*sc)/2 + k*.6, (CH-im.height*sc)/2, im.width*sc, im.height*sc); frames.push(await createImageBitmap(grabC)); }
+    capFps = 30; S.filter = QP.get('f') || 'card';
+    await processAll(true);
+    const pre = (window.__tl || []).findIndex(e => e.t >= 0);
+    window.__hold = Math.min(outFrames.length-1, Math.max(0, pre) + (+QP.get('t') || 40));
+    document.querySelectorAll('#app > *:not(#view)').forEach(el => el.style.display = 'none');
+    document.title = 'READY';
+  };
+  im.src = window.TEST_STILL;
+});
 </script>
 </body>
 </html>
