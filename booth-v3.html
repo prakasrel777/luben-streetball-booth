@@ -867,19 +867,21 @@ function renderCard(o, X, e){
   o.restore();
   // name plate slides up: event logo + "LUBEN STREETBALL PLAYER" over the big question "KING OF THE COURT?"
   o.save(); o.translate(0, (1-plateIn)*220); o.globalAlpha = plateIn;
-  const P = [[22,642],[42,620],[292,620],[308,634],[410,634],[410,722],[390,742],[22,742]];
-  o.fillStyle = 'rgba(12,10,14,.94)'; plate(o, P); o.fill();
+  // plate: one clean shape, bevelled top-left / bottom-right
+  const P = [[22,636],[42,616],[410,616],[410,724],[392,742],[22,742]];
+  o.fillStyle = 'rgba(12,10,14,.95)'; plate(o, P); o.fill();
   o.strokeStyle = MAG; o.lineWidth = 2.5; plate(o, P); o.stroke();
-  o.strokeStyle = 'rgba(255,255,255,.35)'; o.lineWidth = 1;
-  plate(o, [[30,646],[46,628],[288,628],[304,642],[402,642],[402,718],[386,734],[30,734]]); o.stroke();
-  if(logoImg.complete && logoImg.naturalWidth){ const w = 104, h = w*logoImg.naturalHeight/logoImg.naturalWidth; o.drawImage(logoImg, 30, 682 - h/2, w, h); }
-  o.textBaseline = 'alphabetic';
-  o.fillStyle = '#fff'; o.font = `italic 900 40px ${CARD_FONT}`; o.fillText('KING OF THE', 146, 676);
-  o.fillStyle = MAG; o.font = `italic 900 58px ${CARD_FONT}`; o.fillText('COURT?', 142, 728);
-  // sheared magenta tag on the plate's top edge (like the site's "ΤΟ ΑΠΟΛΥΤΟ ΜΟΝΑΚΙ CHALLENGE")
-  o.fillStyle = MAG; plate(o, [[206,598],[412,598],[404,628],[198,628]]); o.fill();
-  o.fillStyle = '#fff'; o.font = `italic 900 19px ${CARD_FONT}`; o.textAlign = 'center';
-  o.fillText('LUBEN STREETBALL PLAYER', 305, 620); o.textAlign = 'left';
+  o.strokeStyle = 'rgba(255,255,255,.3)'; o.lineWidth = 1;
+  plate(o, [[30,640],[46,624],[402,624],[402,720],[388,734],[30,734]]); o.stroke();
+  // column 1: event logo, centred, with a magenta divider
+  if(logoImg.complete && logoImg.naturalWidth){ const w = 94, h = w*logoImg.naturalHeight/logoImg.naturalWidth; o.drawImage(logoImg, 37, 680 - h/2, w, h); }
+  o.strokeStyle = MAG; o.lineWidth = 2; o.beginPath(); o.moveTo(144, 636); o.lineTo(140, 724); o.stroke();
+  // column 2: tag on the top edge, then the title
+  o.fillStyle = MAG; plate(o, [[162,602],[356,602],[350,630],[156,630]]); o.fill();
+  o.fillStyle = '#fff'; o.font = `italic 900 17px ${CARD_FONT}`; o.textAlign = 'left'; o.textBaseline = 'alphabetic';
+  o.fillText('LUBEN STREETBALL PLAYER', 170, 622);
+  o.fillStyle = '#fff'; o.font = `italic 900 37px ${CARD_FONT}`; o.fillText('KING OF THE', 158, 672);
+  o.fillStyle = MAG; o.font = `italic 900 58px ${CARD_FONT}`; o.fillText('COURT?', 154, 726);
   o.restore();
   o.restore();
   if(t < 3){ o.fillStyle = `rgba(255,255,255,${[.75,.35,.1][t]})`; o.fillRect(0,0,CW,CH); }
