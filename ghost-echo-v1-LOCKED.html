@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Booth FX · Ghost Combo</title>
+<style>
+/* Layout: full-bleed stage with a bottom action bar (touch); settings drawer on the right */
+:root{
+  --bg:#0b0a0d; --panel:#16141a; --line:#2a2630; --fg:#f3eef5; --mute:#9c93a3;
+  --mag:#e6007e;
+  --display:'Segoe UI Black','Arial Black',Impact,sans-serif;
+  --body:'Segoe UI',Arial,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:15px/1.4 var(--body);overflow:hidden}
+.app{position:relative;height:100%;display:grid;grid-template-rows:1fr auto}
+.stage{position:relative;display:grid;place-items:center;background:#000;min-height:0}
+canvas#view{max-width:100%;max-height:100%;display:block}
+.big{position:absolute;inset:0;display:grid;place-items:center;font:900 min(30vw,260px)/1 var(--display);color:var(--fg);text-shadow:0 0 40px var(--mag);pointer-events:none}
+.rec{position:absolute;top:18px;left:18px;display:flex;align-items:center;gap:10px;font:700 18px var(--body);letter-spacing:.1em}
+.rec i{width:16px;height:16px;border-radius:50%;background:#ff2a2a;animation:blink .8s infinite}
+@keyframes blink{50%{opacity:.2}}
+.prog{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(420px,80%);text-align:center;font-size:18px}
+.bar{height:8px;background:#2a2630;border-radius:4px;overflow:hidden;margin-top:12px}
+.bar b{display:block;height:100%;width:0;background:var(--mag);transition:width .15s}
+.hud{position:absolute;right:14px;top:12px;font:12px Consolas,monospace;color:var(--mute)}
+.actions{display:flex;gap:14px;justify-content:center;padding:16px;background:var(--bg)}
+.actions button{font:900 22px var(--display);letter-spacing:.04em;padding:18px 34px;border-radius:999px;border:0;cursor:pointer;background:#221f27;color:var(--fg)}
+.actions .primary{background:var(--mag)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.gear{position:absolute;right:14px;bottom:14px;background:#221f27cc;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:600 13px var(--body);cursor:pointer}
+aside{position:absolute;right:0;top:0;bottom:0;width:320px;max-width:90vw;background:var(--panel);border-left:1px solid var(--line);padding:16px;overflow:auto;display:flex;flex-direction:column;gap:16px;z-index:5}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--mute);margin-bottom:8px}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.seg button,.file,.small{font:600 13px var(--body);background:#221f27;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:9px 6px;cursor:pointer;text-align:center}
+.seg button[aria-pressed="true"]{background:var(--mag);border-color:var(--mag)}
+.file input{display:none}
+.row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-bottom:10px}
+.row output{font:12px Consolas,monospace;color:var(--mute)}
+.row input{grid-column:1/-1;width:100%;accent-color:var(--mag)}
+.note{font-size:12px;color:var(--mute);margin:0}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <canvas id="view" width="720" height="405"></canvas>
+    <div class="big" id="count" hidden></div>
+    <div class="rec" id="rec" hidden><i></i>REC</div>
+    <div class="prog" id="prog" hidden><div id="progTxt">Επεξεργασία…</div><div class="bar"><b id="progBar"></b></div></div>
+    <div class="hud" id="hud"></div>
+    <button class="gear" id="gear">Ρυθμίσεις</button>
+    <aside id="panel" hidden>
+      <div>
+        <div class="lbl">Πηγή</div>
+        <div class="seg" style="grid-template-columns:1fr 1fr">
+          <button class="small" id="cam">Κάμερα</button>
+          <label class="file">Βίντεο (test)…<input type="file" id="file" accept="video/*"></label>
+        </div>
+      </div>
+      <div>
+        <div class="lbl">Κάδρο</div>
+        <div class="seg" id="frames_s" style="grid-template-columns:1fr 1fr"><button data-v="portrait" aria-pressed="true">Κάθετο 9:16</button><button data-v="land">Οριζόντιο 16:9</button></div>
+      </div>
+      <div>
+        <div class="lbl">Κάμερα</div>
+        <div class="seg" id="rots"><button data-v="0" aria-pressed="true">Κανονική</button><button data-v="90">Γυρ. 90°</button><button data-v="-90">Γυρ. −90°</button></div>
+        <p class="note" style="margin-top:6px">Αν η κάμερα είναι βιδωμένη κάθετα και βλέπεις τον εαυτό σου πλάγια, διάλεξε 90° ή −90°.</p>
+      </div>
+      <div>
+        <div class="lbl">Ξάκρισμα (model)</div>
+        <div class="seg" id="engines">
+          <button data-v="rvm" aria-pressed="true">RVM (βίντεο)</button>
+          <button data-v="hq">MODNet</button>
+          <button data-v="fast">MediaPipe</button>
+        </div>
+      </div>
+      <div>
+        <div class="lbl">Ανάλυση (RVM / MODNet)</div>
+        <div class="seg" id="ress"><button data-v="256">256</button><button data-v="384" aria-pressed="true">384</button><button data-v="512">512</button></div>
+      </div>
+      <div>
+        <div class="lbl">Ξάκρισμα κάθε (MODNet / MediaPipe)</div>
+        <div class="seg" id="skips" style="grid-template-columns:1fr 1fr"><button data-v="1">1 frame</button><button data-v="2" aria-pressed="true">2 frames (+ ενδιάμεσα)</button></div>
+      </div>
+      <div>
+        <div class="lbl">Διάρκεια capture</div>
+        <div class="seg" id="durs"><button data-v="2">2s</button><button data-v="3" aria-pressed="true">3s</button><button data-v="4">4s</button></div>
+      </div>
+      <div>
+        <div class="lbl">Playback</div>
+        <div class="seg" id="speeds"><button data-v="1">1×</button><button data-v="0.5" aria-pressed="true">0.5×</button><button data-v="0.33">0.33×</button></div>
+      </div>
+      <div>
+        <div class="lbl">Στυλ ghosts</div>
+        <div class="seg" id="gstyles" style="grid-template-columns:1fr 1fr"><button data-v="solid" aria-pressed="true" style="grid-column:1/-1">Solid (γεμάτα, σβήνουν προς τα πίσω)</button><button data-v="stroke">Stroke echo</button><button data-v="both">Duotone + stroke</button><button data-v="duo">Duotone</button><button data-v="flat">Flat</button></div>
+      </div>
+      <div>
+        <div class="lbl">Περίγραμμα παίκτη</div>
+        <div class="row"><span>Πάχος</span><output id="o-outline"></output><input type="range" id="outline_r" min="0" max="12" value="4"></div>
+        <div class="seg" id="ocolors" style="grid-template-columns:1fr 1fr"><button data-v="#e6007e" aria-pressed="true">Magenta</button><button data-v="#ffffff">Λευκό</button></div>
+      </div>
+      <div>
+        <div class="lbl">Ghosts</div>
+        <div class="row"><span>Αντίγραφα</span><output id="o-count"></output><input type="range" id="count_r" min="1" max="12" value="6"></div>
+        <div class="row"><span>Απόσταση (frames)</span><output id="o-gap"></output><input type="range" id="gap_r" min="1" max="8" value="3"></div>
+        <div class="row"><span>Opacity πρώτου</span><output id="o-op"></output><input type="range" id="op_r" min="10" max="100" value="95"></div>
+        <div class="row"><span>Opacity τελευταίου</span><output id="o-opmin"></output><input type="range" id="opmin_r" min="2" max="60" value="6"></div>
+      </div>
+      <div>
+        <div class="lbl">Smear</div>
+        <div class="row"><span>Μήκος ουράς</span><output id="o-decay"></output><input type="range" id="decay_r" min="700" max="990" value="940"></div>
+        <div class="row"><span>Ένταση</span><output id="o-smop"></output><input type="range" id="smop_r" min="0" max="80" value="0"></div>
+      </div>
+      <div>
+        <div class="lbl">Άκρες</div>
+        <div class="row"><span>Feather</span><output id="o-feather"></output><input type="range" id="feather_r" min="0" max="6" step="0.5" value="1.5"></div>
+        <div class="row"><span>Σφίξιμο (choke)</span><output id="o-choke"></output><input type="range" id="choke_r" min="0" max="40" value="15"></div>
+        <div class="row"><span>Σταθεροποίηση (temporal)</span><output id="o-temporal"></output><input type="range" id="temporal_r" min="0" max="70" value="35"></div>
+      </div>
+      <button class="small" id="apply">Εφαρμογή στο τελευταίο capture</button>
+      <p class="note">Χρώμα ghosts magenta, φόντο ασπρόμαυρο. Τα models τρέχουν σε CPU (WASM). Το HQ είναι πιο αργό αλλά κόβει πολύ καθαρότερα μαλλιά και άκρες.</p>
+    </aside>
+  </div>
+  <div class="actions">
+    <button class="primary" id="shoot">● ΠΑΜΕ</button>
+    <button id="again" hidden>ΞΑΝΑ</button>
+    <button id="save" hidden>ΑΠΟΘΗΚΕΥΣΗ</button>
+  </div>
+</div>
+
+<script type="module">
+const $ = s => document.querySelector(s);
+const view = $('#view'), vctx = view.getContext('2d');
+const hud = $('#hud');
+const video = document.createElement('video');
+video.muted = true; video.playsInline = true;
+
+const TINT = '#e6007e';
+const S = {frame:'portrait', rot:0, engine:'rvm', res:384, skip:2, dur:3, speed:.5, count:6, gap:3, op:.95, opmin:.06, decay:.94, smop:0, gstyle:'solid', outline:4, ocolor:'#e6007e', feather:1.5, choke:.15, temporal:.35};
+let CW = 432, CH = 768;
+let mirror = true;
+let state = 'idle';               // idle | count | rec | proc | result
+let frames = [], alphas = [], outFrames = [], capFps = 30;
+
+const mk = (w,h) => { const c = document.createElement('canvas'); c.width=w; c.height=h; return c; };
+// output frame is fixed by the screen (9:16 or 16:9); the camera image is rotated + cover-cropped into it
+function setSize(){
+  [CW, CH] = S.frame==='portrait' ? [432, 768] : [720, 404];
+  view.width = CW; view.height = CH;
+}
+
+/* ---------- UI helpers ---------- */
+const show = (id, on) => $(id).hidden = !on;
+function setState(s){
+  state = s;
+  show('#shoot', s==='idle'); show('#again', s==='result'); show('#save', s==='result');
+  show('#rec', s==='rec'); show('#prog', s==='proc'); show('#count', s==='count');
+}
+function progress(txt, p){ $('#progTxt').textContent = txt; $('#progBar').style.width = Math.round(p*100)+'%'; }
+
+/* ---------- live preview / playback loop ---------- */
+let playI = 0, playT = 0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(state==='result' && outFrames.length){
+    const step = 1000/capFps/S.speed;
+    if(t - playT >= step){ playT = t; vctx.drawImage(outFrames[playI], 0, 0); playI = (playI+1) % outFrames.length; }
+  } else if(state!=='proc' && video.readyState >= 2){
+    drawSrc(vctx);
+  }
+}
+function drawSrc(c){
+  const vw = video.videoWidth, vh = video.videoHeight; if(!vw) return;
+  const rot = S.rot, side = rot !== 0;
+  const rw = side ? vh : vw, rh = side ? vw : vh;
+  const sc = Math.max(CW/rw, CH/rh);
+  c.save();
+  c.fillStyle = '#000'; c.fillRect(0,0,CW,CH);
+  c.translate(CW/2, CH/2);
+  if(mirror && video.srcObject) c.scale(-1,1);
+  c.rotate(rot*Math.PI/180);
+  c.drawImage(video, -vw*sc/2, -vh*sc/2, vw*sc, vh*sc);
+  c.restore();
+}
+requestAnimationFrame(loop);
+
+/* ---------- source ---------- */
+async function openCam(){
+  try{
+    const st = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720,frameRate:30}, audio:false});
+    video.srcObject = st; video.loop = false;
+    await video.play(); setSize(video.videoWidth, video.videoHeight);
+    hud.textContent = '';
+  }catch(e){ hud.textContent = 'Η κάμερα δεν άνοιξε: ' + e.message; }
+}
+$('#cam').onclick = openCam;
+$('#file').onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject = null; }
+  video.src = URL.createObjectURL(f); video.loop = true;
+  await video.play(); setSize(video.videoWidth, video.videoHeight);
+};
+setSize(); openCam();
+
+/* ---------- capture ---------- */
+const grabC = mk(CW, CH);
+async function capture(){
+  setState('count');
+  for(const n of [3,2,1]){ $('#count').textContent = n; await wait(800); }
+  setState('rec');
+  frames = [];
+  grabC.width = CW; grabC.height = CH;
+  const g = grabC.getContext('2d');
+  if(!video.srcObject){ video.currentTime = 0; }
+  const t0 = performance.now(), pend = [];
+  await new Promise(done => {
+    const useRVFC = 'requestVideoFrameCallback' in video;
+    const grab = () => {
+      if(performance.now() - t0 >= S.dur*1000) return done();
+      drawSrc(g); pend.push(createImageBitmap(grabC));
+      useRVFC ? video.requestVideoFrameCallback(grab) : requestAnimationFrame(grab);
+    };
+    grab();
+  });
+  frames = await Promise.all(pend);
+  capFps = frames.length / S.dur;
+  await processAll(true);
+}
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+/* ---------- segmentation engines (CPU) ---------- */
+let mp = null; const mns = {};
+async function loadFast(){
+  if(mp) return mp;
+  progress('Φορτώνει MediaPipe…', 0);
+  const {FilesetResolver, ImageSegmenter} = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
+  const fs = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  mp = await ImageSegmenter.createFromOptions(fs, {
+    baseOptions:{ modelAssetPath:"https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite", delegate:"CPU" },
+    runningMode:"IMAGE", outputConfidenceMasks:true, outputCategoryMask:false
+  });
+  return mp;
+}
+async function loadHQ(){
+  const dtype = S.engine==='hq8' ? 'q8' : 'fp32';
+  if(mns[dtype]) return mns[dtype];
+  progress(`Φορτώνει MODNet ${dtype}…`, 0);
+  const T = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2/dist/transformers.min.js");
+  T.env.allowLocalModels = false;
+  T.env.useBrowserCache = location.protocol.startsWith('http');   // Cache API is unreliable on file://
+  const model = await T.AutoModel.from_pretrained('Xenova/modnet', {device:'wasm', dtype});
+  return mns[dtype] = {T, model};
+}
+const smallC = mk(32,32);
+
+/* RVM: Robust Video Matting (recurrent, made for people in video). Model is local (rvm_model.js) */
+let rvm = null, rvmState = null;
+const loadScript = src => new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => no(new Error('δεν φόρτωσε ' + src)); document.head.appendChild(s); });
+async function loadRVM(){
+  if(rvm) return rvm;
+  progress('Φορτώνει RVM…', 0);
+  if(!window.ort) await loadScript('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js');
+  ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/';
+  if(!window.RVM_B64) await loadScript('rvm_model.js');
+  const bin = atob(window.RVM_B64), bytes = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+  rvm = await ort.InferenceSession.create(bytes, {executionProviders:['wasm']});
+  return rvm;
+}
+function rvmReset(){
+  const z = () => new ort.Tensor('float32', new Float32Array(1), [1,1,1,1]);
+  rvmState = {r1:z(), r2:z(), r3:z(), r4:z()};
+}
+async function rvmAlpha(canvas){
+  const w = canvas.width, h = canvas.height;
+  const px = canvas.getContext('2d').getImageData(0,0,w,h).data, n = w*h, src = new Float32Array(3*n);
+  for(let i=0;i<n;i++){ src[i]=px[i*4]/255; src[n+i]=px[i*4+1]/255; src[2*n+i]=px[i*4+2]/255; }
+  const ratio = ({256:.35, 384:.5, 512:.7})[S.res] || .5;
+  const r = await rvm.run({
+    src: new ort.Tensor('float32', src, [1,3,h,w]),
+    r1i: rvmState.r1, r2i: rvmState.r2, r3i: rvmState.r3, r4i: rvmState.r4,
+    downsample_ratio: new ort.Tensor('float32', new Float32Array([ratio]), [1])
+  });
+  rvmState = {r1:r.r1o, r2:r.r2o, r3:r.r3o, r4:r.r4o};
+  const d = r.pha.dims;
+  return {w:d[3], h:d[2], a: Float32Array.from(r.pha.data)};
+}
+// returns {w,h,a: Float32Array alpha 0..1}
+async function alphaFor(canvas){
+  if(S.engine==='fast'){
+    let out;
+    mp.segment(canvas, r => {
+      const m = r.confidenceMasks[0];            // class 0 = background
+      const bg = m.getAsFloat32Array(), a = new Float32Array(bg.length);
+      for(let i=0;i<bg.length;i++) a[i] = 1 - bg[i];
+      out = {w:m.width, h:m.height, a};
+    });
+    return out;
+  } else {
+    const {T, model} = mns[S.engine==='hq8' ? 'q8' : 'fp32'];
+    // own preprocessing at a chosen resolution (shortest edge = S.res, multiple of 32)
+    const sc = S.res / Math.min(canvas.width, canvas.height);
+    const w = Math.max(32, Math.round(canvas.width*sc/32)*32), h = Math.max(32, Math.round(canvas.height*sc/32)*32);
+    smallC.width = w; smallC.height = h;
+    const sx = smallC.getContext('2d', {willReadFrequently:true});
+    sx.drawImage(canvas, 0, 0, w, h);
+    const px = sx.getImageData(0,0,w,h).data, n = w*h, data = new Float32Array(3*n);
+    for(let i=0;i<n;i++){
+      data[i]     = px[i*4]  /127.5 - 1;
+      data[n+i]   = px[i*4+1]/127.5 - 1;
+      data[2*n+i] = px[i*4+2]/127.5 - 1;
+    }
+    const {output} = await model({input: new T.Tensor('float32', data, [1,3,h,w])});
+    const d = output.dims;
+    return {w:d[d.length-1], h:d[d.length-2], a: Float32Array.from(output.data)};
+  }
+}
+
+/* ---------- process: segment once, compose (fast, repeatable) ---------- */
+async function processAll(resegment){
+  if(!frames.length) return;
+  setState('proc');
+  const t0 = performance.now();
+  if(resegment){
+    try{ S.engine==='fast' ? await loadFast() : S.engine==='rvm' ? await loadRVM() : await loadHQ(); }
+    catch(e){ progress('Το model δεν φόρτωσε: ' + e.message, 0); return; }
+    alphas = [];
+    const work = mk(CW, CH), w = work.getContext('2d', {willReadFrequently:true});
+    const isRVM = S.engine==='rvm';
+    if(isRVM) rvmReset();
+    const N = frames.length, step = isRVM ? 1 : S.skip, ts = performance.now(); let done = 0;
+    // RVM is recurrent: warm it up on the first frame a few times so frame 1 is already clean
+    if(isRVM){ w.drawImage(frames[0],0,0); for(let k=0;k<3;k++) await rvmAlpha(work); }
+    for(let i=0;i<N;i++){
+      const key = i%step===0 || i===N-1;
+      if(!key){ alphas.push(null); continue; }
+      w.drawImage(frames[i],0,0);
+      alphas.push(isRVM ? await rvmAlpha(work) : await alphaFor(work)); done++;
+      const ms = (performance.now()-ts)/done;
+      progress(`Ξάκρισμα ${i+1}/${N} · ${ms.toFixed(0)} ms/frame`, (i+1)/N*.8);
+      await wait(0);
+    }
+    // fill skipped frames by blending the neighbouring masks
+    for(let i=0;i<N;i++){
+      if(alphas[i]) continue;
+      let p=i-1; while(!alphas[p]) p--;
+      let q=i+1; while(!alphas[q]) q++;
+      const A=alphas[p], B=alphas[q], t=(i-p)/(q-p), a=new Float32Array(A.a.length);
+      for(let j=0;j<a.length;j++) a[j]=A.a[j]*(1-t)+B.a[j]*t;
+      alphas[i] = {w:A.w, h:A.h, a};
+    }
+  }
+  await composeAll(resegment ? .8 : 0);
+  const secs = ((performance.now()-t0)/1000).toFixed(1);
+  hud.textContent = `${frames.length} frames · ${capFps.toFixed(0)} fps · επεξεργασία ${secs}s · ${({rvm:'RVM',hq:'MODNet',fast:'MediaPipe'})[S.engine]} ${S.res}`;
+  playI = 0; setState('result');
+}
+
+// alpha → mask canvas, with temporal smoothing and choke curve
+function maskCanvases(){
+  const out = []; let prev = null;
+  for(const m of alphas){
+    const a = new Float32Array(m.a.length);
+    const k = (prev && prev.length===a.length) ? S.temporal : 0;
+    for(let i=0;i<a.length;i++) a[i] = m.a[i]*(1-k) + (k ? prev[i]*k : 0);
+    prev = a;
+    const c = mk(m.w, m.h), x = c.getContext('2d'), id = x.createImageData(m.w, m.h);
+    const lo = S.choke, hi = Math.min(1, S.choke + .5);
+    for(let i=0;i<a.length;i++){
+      let v = (a[i]-lo)/(hi-lo); v = v<0?0:v>1?1:v;
+      v = v*v*(3-2*v);                           // smoothstep for a clean edge
+      id.data[i*4+3] = v*255;
+    }
+    x.putImageData(id,0,0); out.push(c);
+  }
+  return out;
+}
+
+async function composeAll(p0){
+  const masks = maskCanvases();
+  const out = mk(CW,CH), o = out.getContext('2d');
+  const cut = mk(CW,CH), c = cut.getContext('2d');
+  const tint = mk(CW,CH), tc = tint.getContext('2d');
+  const trail = mk(CW,CH), tr = trail.getContext('2d');
+  const fxC = mk(CW,CH), fx = fxC.getContext('2d');
+  const olC = mk(CW,CH), ol = olC.getContext('2d');
+  const covC = mk(CW,CH), cv = covC.getContext('2d');
+  const layC = mk(CW,CH), ly = layC.getContext('2d');
+  const buf = [];
+  outFrames = [];
+  for(let i=0;i<frames.length;i++){
+    // cutout
+    c.globalCompositeOperation='source-over'; c.clearRect(0,0,CW,CH);
+    c.drawImage(frames[i],0,0);
+    c.globalCompositeOperation='destination-in';
+    c.filter = S.feather ? `blur(${S.feather}px)` : 'none';
+    c.drawImage(masks[i],0,0,CW,CH);
+    c.filter='none'; c.globalCompositeOperation='source-over';
+    // stroke ring of this frame (used for the player outline and for stroke echoes)
+    const px = Math.max(S.outline, 2);
+    ol.globalCompositeOperation='source-over'; ol.clearRect(0,0,CW,CH);
+    ol.filter=`blur(${px}px)`;
+    for(let k=0;k<5;k++) ol.drawImage(masks[i],0,0,CW,CH);
+    ol.filter='none';
+    ol.globalCompositeOperation='source-in'; ol.fillStyle=S.ocolor; ol.fillRect(0,0,CW,CH);
+    ol.globalCompositeOperation='destination-out'; ol.drawImage(masks[i],0,0,CW,CH);
+    ol.globalCompositeOperation='source-over';
+    const hasStroke = S.gstyle==='stroke' || S.gstyle==='both';
+    const hasFill = S.gstyle!=='stroke';
+    // magenta copy: duotone keeps the body's detail (light areas → magenta, shadows → dark)
+    tc.globalCompositeOperation='source-over'; tc.clearRect(0,0,CW,CH);
+    if(!hasFill){
+      // nothing: echoes are strokes only
+    } else if(S.gstyle==='solid'){
+      // flat silhouette, solid brand colour
+      tc.drawImage(masks[i],0,0,CW,CH);
+      tc.globalCompositeOperation='source-in'; tc.fillStyle=TINT; tc.fillRect(0,0,CW,CH);
+    } else if(S.gstyle==='duo' || S.gstyle==='both'){
+      tc.filter='grayscale(1) contrast(1.5) brightness(1.6)'; tc.drawImage(cut,0,0); tc.filter='none';
+      tc.globalCompositeOperation='multiply'; tc.fillStyle=TINT; tc.fillRect(0,0,CW,CH);
+      tc.globalCompositeOperation='destination-in'; tc.drawImage(cut,0,0);
+    } else {
+      tc.drawImage(cut,0,0);
+      tc.globalCompositeOperation='source-atop'; tc.globalAlpha=.85; tc.fillStyle=TINT; tc.fillRect(0,0,CW,CH);
+      tc.globalAlpha=1;
+    }
+    tc.globalCompositeOperation='source-over';
+    // echo copy: filled ghost at half res and/or stroke ring at full res (rings must stay sharp)
+    const keep = {fill:null, ring:null};
+    const fillScale = S.gstyle==='solid' ? 0 : 1;   // solid silhouettes stay full-res so their edge is crisp
+    if(hasFill){ keep.fill = mk(CW>>fillScale, CH>>fillScale); keep.fill.getContext('2d').drawImage(tint,0,0,keep.fill.width,keep.fill.height); }
+    if(hasStroke){ keep.ring = mk(CW, CH); keep.ring.getContext('2d').drawImage(olC,0,0); }
+    buf.push(keep);
+    if(buf.length > 12*8+2) buf.shift();
+    // body-only smear
+    tr.globalCompositeOperation='destination-out'; tr.fillStyle=`rgba(0,0,0,${1-S.decay})`; tr.fillRect(0,0,CW,CH);
+    tr.globalCompositeOperation='source-over'; tr.globalAlpha=S.smop; tr.drawImage(hasFill ? tint : olC,0,0); tr.globalAlpha=1;
+    // magenta layer (smear + ghosts), then punch out the current body so it always sits BEHIND the player
+    fx.globalCompositeOperation='source-over'; fx.clearRect(0,0,CW,CH);
+    fx.drawImage(trail,0,0);
+    // geometric falloff: every layer back is a clear step dimmer (first = op, last = opmin)
+    const fall = S.count>1 ? Math.pow(S.opmin/S.op, 1/(S.count-1)) : 1;
+    const alphaOf = g => S.op * Math.pow(fall, g-1);
+    // fills: newest → oldest, each one only where no newer layer already sits, so tones never add up
+    cv.clearRect(0,0,CW,CH);
+    for(let g=1; g<=S.count; g++){
+      const b = buf[buf.length-1-g*S.gap]; if(!b || !b.fill) continue;
+      ly.globalCompositeOperation='source-over'; ly.clearRect(0,0,CW,CH);
+      ly.drawImage(b.fill,0,0,CW,CH);
+      ly.globalCompositeOperation='destination-out'; ly.drawImage(covC,0,0);
+      fx.globalAlpha = alphaOf(g); fx.drawImage(layC,0,0);
+      cv.drawImage(b.fill,0,0,CW,CH);
+    }
+    // strokes on top of the fills, oldest → newest
+    for(let g=S.count; g>=1; g--){
+      const b = buf[buf.length-1-g*S.gap]; if(!b || !b.ring) continue;
+      fx.globalAlpha = Math.min(1, alphaOf(g)*1.4); fx.drawImage(b.ring,0,0);
+    }
+    fx.globalAlpha=1; ly.globalCompositeOperation='source-over';
+    fx.globalCompositeOperation='destination-out';
+    fx.filter='blur(4px)'; fx.drawImage(masks[i],0,0,CW,CH); fx.drawImage(masks[i],0,0,CW,CH); fx.filter='none';
+    fx.globalCompositeOperation='source-over';
+    // compose: B&W background → magenta → player
+    o.filter='grayscale(1) contrast(1.3) brightness(.45)'; o.drawImage(frames[i],0,0); o.filter='none';
+    // duotone glows with "screen"; solid / stroke sit on top as true brand colour
+    o.globalCompositeOperation = (S.gstyle==='duo'||S.gstyle==='both') ? 'screen' : 'source-over';
+    o.drawImage(fxC,0,0); o.globalCompositeOperation='source-over';
+    // sticker outline around the player (also hides small matting errors)
+    if(S.outline) o.drawImage(olC,0,0);
+    // player in colour, slightly graded so he pops off the B&W background
+    o.filter='contrast(1.15) saturate(1.3) brightness(1.1)'; o.drawImage(cut,0,0); o.filter='none';
+    outFrames.push(await createImageBitmap(out));
+    if(i%4===0){ progress(`Εφέ ${i+1}/${frames.length}`, p0 + (i+1)/frames.length*(1-p0)); await wait(0); }
+  }
+}
+
+/* ---------- save (webm of one loop) ---------- */
+async function save(){
+  if(!outFrames.length) return;
+  const rec = new MediaRecorder(view.captureStream(30), {mimeType:'video/webm'});
+  const chunks = []; rec.ondataavailable = e => chunks.push(e.data);
+  const btn = $('#save'); btn.textContent = 'ΓΡΑΦΕΙ…'; btn.disabled = true;
+  playI = 0; rec.start();
+  await wait(outFrames.length * 1000/capFps/S.speed + 200);
+  rec.stop(); await new Promise(r => rec.onstop = r);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(chunks, {type:'video/webm'}));
+  a.download = 'luben-ghost-' + Date.now() + '.webm'; a.click();
+  btn.textContent = 'ΑΠΟΘΗΚΕΥΣΗ'; btn.disabled = false;
+}
+
+/* ---------- wiring ---------- */
+$('#shoot').onclick = capture;
+$('#again').onclick = () => { outFrames = []; setState('idle'); };
+$('#save').onclick = save;
+$('#gear').onclick = () => $('#panel').hidden = !$('#panel').hidden;
+let dirtySeg = false;
+$('#apply').onclick = () => { if(frames.length){ processAll(dirtySeg || !alphas.length); dirtySeg = false; } };
+
+function pick(group, fn){
+  group.addEventListener('click', e => {
+    const b = e.target.closest('button'); if(!b) return;
+    group.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x===b));
+    fn(b.dataset.v);
+  });
+}
+pick($('#engines'), v => { S.engine = v; dirtySeg = true; });
+pick($('#ress'), v => { S.res = +v; dirtySeg = true; });
+pick($('#skips'), v => { S.skip = +v; dirtySeg = true; });
+pick($('#frames_s'), v => { S.frame = v; if(state!=='proc'){ setSize(); outFrames = []; frames = []; setState('idle'); } });
+pick($('#rots'), v => S.rot = +v);
+pick($('#durs'), v => S.dur = +v);
+pick($('#gstyles'), v => S.gstyle = v);
+pick($('#ocolors'), v => S.ocolor = v);
+pick($('#speeds'), v => S.speed = +v);
+const bind = (id, key, f, fmt) => {
+  const el = $('#'+id+'_r'), o = $('#o-'+id);
+  const up = () => { S[key] = f(+el.value); o.textContent = fmt(S[key]); };
+  el.oninput = up; up();
+};
+bind('count','count', v=>v, v=>v);
+bind('gap','gap', v=>v, v=>v);
+bind('op','op', v=>v/100, v=>Math.round(v*100)+'%');
+bind('opmin','opmin', v=>v/100, v=>Math.round(v*100)+'%');
+bind('decay','decay', v=>v/1000, v=>v.toFixed(3));
+bind('smop','smop', v=>v/100, v=>Math.round(v*100)+'%');
+bind('feather','feather', v=>v, v=>v+'px');
+bind('outline','outline', v=>v, v=>v+'px');
+bind('choke','choke', v=>v/100, v=>Math.round(v*100)+'%');
+bind('temporal','temporal', v=>v/100, v=>Math.round(v*100)+'%');
+setState('idle');
+</script>
+</body>
+</html>

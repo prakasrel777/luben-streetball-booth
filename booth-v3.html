@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Luben Streetball Booth</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Sans+Extra+Condensed:ital,wght@0,600;0,800;1,800;1,900&display=swap">
+<style>
+/* Vertical 9:16 booth screen. Layers: live/result canvas → viewfinder HUD → idle UI (logo TL, VIRAL headline, filter list) → result UI (QR TL, logo burned in bottom-centre) */
+:root{
+  --ink:#0b0a0d; --panel:#16141a; --line:#2a2630; --fg:#ffffff; --mute:#a59cab;
+  --mag:#e6007e; --red:#ff2a2a; --grad:linear-gradient(90deg,#ff2a2a,#e6007e);
+  --cond:'Fira Sans Extra Condensed','Arial Narrow',Impact,sans-serif;
+  --body:'Segoe UI',Arial,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;color:var(--fg);font:15px/1.4 var(--body);overflow:hidden}
+.app{position:relative;height:100vh;aspect-ratio:9/16;max-width:100vw;margin:0 auto;overflow:hidden;background:var(--ink);container-type:size}
+canvas#view{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.shade{position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.55) 0%,rgba(0,0,0,0) 22%,rgba(0,0,0,0) 55%,rgba(0,0,0,.8) 100%)}
+.grain{position:absolute;inset:0;pointer-events:none;opacity:.18;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+/* viewfinder: "ready to record" */
+.vf{position:absolute;inset:3cqh 4cqw;pointer-events:none;z-index:2}
+.vf i{position:absolute;width:9cqw;height:9cqw;border:3px solid rgba(255,255,255,.85)}
+.vf i:nth-of-type(1){left:0;top:0;border-right:0;border-bottom:0}
+.vf i:nth-of-type(2){right:0;top:0;border-left:0;border-bottom:0}
+.vf i:nth-of-type(3){left:0;bottom:0;border-right:0;border-top:0}
+.vf i:nth-of-type(4){right:0;bottom:0;border-left:0;border-top:0}
+.vf .grid{position:absolute;inset:0;background:
+  linear-gradient(90deg,transparent calc(33.33% - .5px),rgba(255,255,255,.14) calc(33.33% - .5px) calc(33.33% + .5px),transparent calc(33.33% + .5px) calc(66.66% - .5px),rgba(255,255,255,.14) calc(66.66% - .5px) calc(66.66% + .5px),transparent calc(66.66% + .5px)),
+  linear-gradient(180deg,transparent calc(33.33% - .5px),rgba(255,255,255,.14) calc(33.33% - .5px) calc(33.33% + .5px),transparent calc(33.33% + .5px) calc(66.66% - .5px),rgba(255,255,255,.14) calc(66.66% - .5px) calc(66.66% + .5px),transparent calc(66.66% + .5px))}
+.vf .stat{position:absolute;right:2cqw;top:1.4cqh;font:600 2cqh/1 Consolas,monospace;letter-spacing:.06em;display:flex;gap:2cqw;align-items:center}
+.vf .dot{width:1.6cqh;height:1.6cqh;border-radius:50%;background:#fff;opacity:.7}
+.vf .grid,.vf .tc{display:none}
+.vf.live .grid,.vf.live .tc{display:block}
+.vf.recording i{border-color:var(--red)}
+.vf.recording .dot{background:var(--red);opacity:1;animation:blink .8s infinite}
+.vf .tc{position:absolute;left:50%;bottom:1.6cqh;transform:translateX(-50%);font:600 2.2cqh/1 Consolas,monospace;letter-spacing:.08em;opacity:.85}
+@keyframes blink{50%{opacity:.25}}
+
+.logoTL{position:absolute;z-index:2;left:5cqw;top:3.5cqh;width:22cqw;filter:drop-shadow(0 .6cqh 1.2cqh rgba(0,0,0,.6))}
+
+/* idle decoration in the event's graphic language: magenta spray bloom, white chalk scribbles, black balls */
+.deco{position:absolute;inset:0;pointer-events:none}
+.deco .dim{position:absolute;inset:0;background:rgba(5,4,7,.55)}
+#spray{position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen}
+/* half court seen from mid-court, laid flat in perspective (baseline + hoop far away) */
+.court{position:absolute;left:-22cqw;width:144cqw;bottom:-8cqh;height:auto;transform:perspective(90cqh) rotateX(42deg);transform-origin:50% 100%}
+.ball{position:absolute;filter:drop-shadow(0 2cqh 3cqh rgba(0,0,0,.7))}
+.ball.b1{width:34cqw;right:-9cqw;top:13cqh;animation:float 6s ease-in-out infinite}
+.ball.b2{width:22cqw;left:-6cqw;top:60cqh;filter:blur(2px) drop-shadow(0 2cqh 3cqh rgba(0,0,0,.7));animation:float 7.5s ease-in-out infinite reverse}
+@keyframes float{50%{transform:translateY(-1.6cqh) rotate(8deg)}}
+
+/* headline: condensed italic, white + magenta, no boxes (like the 14/11 banner) */
+.hero{position:absolute;left:0;right:0;top:24cqh;display:flex;flex-direction:column;align-items:center;text-align:center;pointer-events:none;transform:rotate(-4deg)}
+.hero .l1:not(.l3){font-size:5.6cqh!important;align-self:flex-start;margin-left:13cqw}
+.hero .l1{font:italic 800 7.6cqh/0.92 var(--cond);text-transform:uppercase;text-shadow:0 .6cqh 2.4cqh rgba(0,0,0,.7)}
+.hero .l2{font:italic 900 19cqh/0.82 var(--cond);color:var(--mag);letter-spacing:-.01em;text-shadow:0 0 4cqh rgba(230,0,126,.45),0 .8cqh 0 rgba(0,0,0,.55)}
+.hero .l3{font-size:6.6cqh;margin-top:-.6cqh;position:relative;align-self:flex-end;margin-right:14cqw}
+/* sheared tag, like "ΤΟ ΑΠΟΛΥΤΟ ΜΟΝΑΚΙ CHALLENGE" on the site */
+.hero .sub{margin-top:2.4cqh;font:italic 800 2.6cqh/1 var(--cond);letter-spacing:.05em;text-transform:uppercase;background:#000;padding:1cqh 3.4cqw;transform:skewX(-14deg);box-shadow:0 .8cqh 2.4cqh rgba(0,0,0,.45)}
+.hero .sub span{display:inline-block;transform:skewX(14deg)}
+.hero .sub em{font-style:inherit;color:var(--mag)}
+
+/* filter list (bottom) */
+.filters{position:absolute;left:9cqw;right:9cqw;bottom:13.5cqh;display:grid;grid-template-columns:1fr 1fr;gap:1cqh 2.4cqw}
+.fbtn{display:flex;align-items:center;gap:2.4cqw;padding:.9cqh 2.4cqw;border-radius:.6cqh;border:.35cqh solid rgba(255,255,255,.22);background:rgba(8,7,10,.85);color:#fff;cursor:pointer;text-align:left;backdrop-filter:blur(6px)}
+.fbtn b{font:italic 900 2.4cqh/1 var(--cond);letter-spacing:.02em;text-transform:uppercase}
+.fbtn .ic{flex:none;width:4.4cqh;height:4.4cqh;border-radius:.7cqh}
+.fbtn[aria-pressed="true"]{border-color:var(--mag);background:rgba(230,0,126,.22);box-shadow:0 0 0 .3cqh var(--mag),0 0 3cqh rgba(230,0,126,.5)}
+.ic.g{background:radial-gradient(circle at 70% 50%,var(--mag) 0 28%,transparent 29%),radial-gradient(circle at 50% 50%,rgba(230,0,126,.55) 0 28%,transparent 29%),radial-gradient(circle at 30% 50%,rgba(230,0,126,.22) 0 28%,transparent 29%),#1b1820}
+.ic.q{background:repeating-linear-gradient(90deg,var(--mag) 0 .7cqh,#fff .7cqh 1cqh,#111 1cqh 1.6cqh)}
+.ic.r{background:linear-gradient(90deg,var(--mag) 0 33%,var(--red) 33% 66%,#fff 66%)}
+.ic.s{background:var(--mag);box-shadow:inset 0 0 0 .7cqh #fff;transform:rotate(-7deg)}
+.ic.f{background:radial-gradient(ellipse 45% 70% at 50% 100%,#fff 0 18%,var(--red) 40%,var(--mag) 65%,#3a0020 90%)}
+.fbtn.wide{grid-column:1/-1;justify-self:center;width:calc(50% - 1.2cqw)}
+
+.go{position:absolute;left:50%;bottom:4cqh;transform:translateX(-50%);white-space:nowrap;font:italic 900 3.6cqh/1 var(--cond);letter-spacing:.04em;padding:1.4cqh 10cqw;border:0;border-radius:99px;background:var(--grad);color:#fff;cursor:pointer;box-shadow:0 1cqh 3cqh rgba(230,0,126,.5);animation:pulse 1.6s ease-in-out infinite}
+.go:disabled{background:#2a2630;color:var(--mute);box-shadow:none;animation:none;cursor:default}
+@keyframes pulse{50%{transform:translateX(-50%) scale(1.05)}}
+
+.count{position:absolute;inset:0;display:grid;place-items:center;font:italic 900 40cqh/1 var(--cond);text-shadow:0 0 6cqh var(--mag);pointer-events:none}
+.prog{position:absolute;left:10cqw;right:10cqw;top:44cqh;text-align:center}
+.prog .t{font:italic 900 6cqh/1 var(--cond);text-transform:uppercase}
+.prog .s{font:600 1.8cqh Consolas,monospace;color:var(--mute);margin-top:1cqh}
+.bar{height:1cqh;background:rgba(255,255,255,.15);border-radius:1cqh;overflow:hidden;margin-top:2cqh}
+.bar b{display:block;height:100%;width:0;background:var(--grad);transition:width .15s}
+
+/* result */
+.qr{position:absolute;left:5cqw;top:3.5cqh;background:#fff;color:#000;border-radius:1.2cqh;padding:1.2cqh;width:22cqw;text-align:center;box-shadow:0 1cqh 3cqh rgba(0,0,0,.5)}
+.qr #qrbox svg,.qr #qrbox img{width:100%;height:auto;display:block}
+.qr span{display:block;font:italic 900 1.9cqh/1.05 var(--cond);text-transform:uppercase;margin-top:.8cqh}
+.rbtns{position:absolute;right:4cqw;top:4cqh;display:flex;flex-direction:column;gap:1.2cqh}
+.rbtns button{font:italic 900 2.6cqh/1 var(--cond);letter-spacing:.04em;padding:1.2cqh 3.4cqw;border-radius:99px;border:0;cursor:pointer;background:rgba(15,13,18,.8);color:#fff}
+.rbtns .p{background:var(--grad)}
+
+.gear{position:absolute;right:1.5cqw;bottom:1cqh;background:transparent;color:rgba(255,255,255,.35);border:0;font:600 1.4cqh var(--body);cursor:pointer;z-index:6}
+aside{position:absolute;right:0;top:0;bottom:0;width:min(320px,80cqw);background:var(--panel);border-left:1px solid var(--line);padding:16px;overflow:auto;display:flex;flex-direction:column;gap:16px;z-index:7;font-size:14px}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--mute);margin-bottom:8px}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.seg button,.file,.small{font:600 13px var(--body);background:#221f27;color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:9px 6px;cursor:pointer;text-align:center}
+.seg button[aria-pressed="true"]{background:var(--mag);border-color:var(--mag)}
+.file input{display:none}
+.row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-bottom:10px}
+.row output{font:12px Consolas,monospace;color:var(--mute)}
+.row input{grid-column:1/-1;width:100%;accent-color:var(--mag)}
+.note{font-size:12px;color:var(--mute);margin:0}
+button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.go{animation:none}}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <canvas id="view" width="432" height="768"></canvas>
+  <div class="shade"></div>
+  <div class="grain"></div>
+
+  <div class="vf" id="vf">
+    <div class="grid"></div><i></i><i></i><i></i><i></i>
+    <div class="stat"><span id="vfMode">READY</span><span class="dot"></span></div>
+    <div class="tc" id="tc">00:00:00</div>
+  </div>
+
+  <img class="logoTL" id="logoTL" alt="Luben Streetball 1vs1">
+
+  <!-- step 1: idle / pick a filter -->
+  <div class="deco" id="deco">
+    <div class="dim"></div>
+    <canvas id="spray" width="432" height="768"></canvas>
+    <!-- FIBA half court, 1 unit = 1 cm / 3 (15 m × 14 m → 500 × 467) -->
+    <svg class="court" viewBox="-10 -10 520 487" fill="none" stroke="#fff" stroke-opacity=".38" stroke-width="2.4" stroke-linecap="round">
+      <rect x="0" y="0" width="500" height="467"/>                       <!-- baseline, sidelines, half-court line -->
+      <rect x="168" y="0" width="164" height="193"/>                     <!-- key 4.9 m × 5.8 m -->
+      <circle cx="250" cy="193" r="60"/>                                 <!-- free-throw circle -->
+      <path d="M22 0 V99 A225 225 0 0 0 478 99 V0"/>                     <!-- 3-pt line 6.75 m -->
+      <path d="M210 52 A40 40 0 0 0 290 52"/>                            <!-- no-charge arc -->
+      <path d="M220 40 H280" stroke-width="4" stroke-opacity=".6"/>      <!-- backboard -->
+      <circle cx="250" cy="52" r="8" stroke="#e6007e" stroke-opacity=".9" stroke-width="3"/>  <!-- rim -->
+      <path d="M190 467 A60 60 0 0 1 310 467"/>                          <!-- centre circle (half) -->
+    </svg>
+    <img class="ball b1" src="assets/ball1.png" alt="">
+    <img class="ball b2" src="assets/ball2.png" alt="">
+  </div>
+  <div class="hero" id="hero">
+    <div class="l1">Θέλεις να γίνεις</div>
+    <div class="l2">VIRAL</div>
+    <div class="l1 l3">Προφανώς</div>
+    <div class="sub"><span>Διάλεξε φίλτρο · πάτα <em>ΠΑΜΕ</em></span></div>
+  </div>
+  <div class="filters" id="filters">
+    <button class="fbtn" data-f="ghost"><span class="ic g"></span><b>Ghost<br>Echo</b></button>
+    <button class="fbtn" data-f="quake"><span class="ic q"></span><b>Earthquake<br>Echo</b></button>
+    <button class="fbtn" data-f="rgb"><span class="ic r"></span><b>RGB<br>Ghost</b></button>
+    <button class="fbtn" data-f="sticker"><span class="ic s"></span><b>Jittery<br>Sticker</b></button>
+    <button class="fbtn wide" data-f="flame"><span class="ic f"></span><b>Flame<br>Outline</b></button>
+  </div>
+  <button class="go" id="go" disabled>● ΠΑΜΕ</button>
+
+  <!-- step 2: countdown / processing -->
+  <div class="count" id="count" hidden></div>
+  <div class="prog" id="prog" hidden><div class="t" id="progTxt">Γίνεσαι viral…</div><div class="bar"><b id="progBar"></b></div><div class="s" id="progSub"></div></div>
+
+  <!-- step 3: result -->
+  <div class="qr" id="qr" hidden><div id="qrbox"></div><span>Σκάναρε &amp; κατέβασέ το</span></div>
+  <div class="rbtns" id="rbtns" hidden>
+    <button class="p" id="again">ΞΑΝΑ</button>
+    <button id="done">ΤΕΛΟΣ</button>
+  </div>
+
+  <aside id="panel" hidden>
+    <div>
+      <div class="lbl">Freeze frame</div>
+      <div class="seg" id="freezes"><button data-v="auto" aria-pressed="true">Ανά φίλτρο</button><button data-v="on">Πάντα</button><button data-v="off">Ποτέ</button></div>
+      <p class="note" style="margin-top:6px">Ανά φίλτρο: το Ghost Echo παίζει όλο το βίντεο, τα άλλα τρία παγώνουν στο πιο έντονο σημείο της κίνησης.</p>
+    </div>
+    <div>
+      <div class="row"><span>Ένταση εφέ</span><output id="o-intensity"></output><input type="range" id="intensity_r" min="30" max="200" value="100"></div>
+      <div class="row"><span>Διάρκεια freeze</span><output id="o-hold"></output><input type="range" id="hold_r" min="20" max="90" value="45"></div>
+    </div>
+    <div>
+      <div class="lbl">Πηγή</div>
+      <div class="seg" style="grid-template-columns:1fr 1fr">
+        <button class="small" id="cam">Κάμερα</button>
+        <label class="file">Βίντεο (test)…<input type="file" id="file" accept="video/*"></label>
+      </div>
+    </div>
+    <div>
+      <div class="lbl">Χρώμα φωτιάς (Flame)</div>
+      <div class="seg" id="fpals" style="grid-template-columns:1fr 1fr"><button data-v="brand" aria-pressed="true">Brand (magenta/κόκκινο)</button><button data-v="natural">Φυσική (πορτοκαλί)</button></div>
+    </div>
+    <div>
+      <div class="lbl">Κάμερα</div>
+      <div class="seg" id="rots"><button data-v="0" aria-pressed="true">Κανονική</button><button data-v="90">Γυρ. 90°</button><button data-v="-90">Γυρ. −90°</button></div>
+    </div>
+    <div>
+      <div class="lbl">Διάρκεια capture</div>
+      <div class="seg" id="durs"><button data-v="2">2s</button><button data-v="3" aria-pressed="true">3s</button><button data-v="4">4s</button></div>
+    </div>
+    <div>
+      <div class="lbl">Ξάκρισμα (RVM)</div>
+      <div class="seg" id="ress"><button data-v="256">256</button><button data-v="384" aria-pressed="true">384</button><button data-v="512">512</button></div>
+    </div>
+    <div>
+      <div class="lbl">Demo</div>
+      <div class="seg" style="grid-template-columns:1fr 1fr">
+        <button class="small" id="same">Ίδιο clip με άλλο φίλτρο</button>
+        <button class="small" id="save">Κατέβασε webm</button>
+      </div>
+      <p class="note" style="margin-top:6px">Το QR εδώ είναι placeholder. Στο booth δείχνει το link που επιστρέφει ο server μετά το upload.</p>
+    </div>
+  </aside>
+</div>
+
+<script src="assets/logo_data.js"></script>
+<script src="assets/balls_data.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script type="module">
+const $ = s => document.querySelector(s);
+const view = $('#view'), vctx = view.getContext('2d');
+const video = document.createElement('video');
+video.muted = true; video.playsInline = true;
+
+const MAG = '#e6007e', RED = '#ff2a2a', WHITE = '#ffffff';
+const CFG = {
+  ghost:   {name:'GHOST ECHO',      freeze:false},
+  quake:   {name:'EARTHQUAKE ECHO', freeze:true},
+  rgb:     {name:'RGB GHOST',       freeze:false, slow:4},     // no freeze: 4× smooth slow motion, effect on from the start
+  sticker: {name:'JITTERY STICKER', freeze:true},
+  flame:   {name:'FLAME OUTLINE',   freeze:false},
+};
+const S = {filter:null, freezeMode:'auto', intensity:1, hold:45, rot:0, res:384, dur:3, speed:.5,
+           feather:1.5, choke:.15, temporal:.35, flamePal:'brand'};
+const CW = 432, CH = 768;
+const mirror = true;
+let state = 'idle';               // idle | count | rec | proc | result
+let frames = [], alphas = [], outFrames = [], capFps = 30;
+
+const mk = (w,h) => { const c = document.createElement('canvas'); c.width=w; c.height=h; return c; };
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const logoImg = new Image();
+if(window.LOGO_URI){ logoImg.src = window.LOGO_URI; $('#logoTL').src = window.LOGO_URI; }
+
+/* ---------- magenta spray bloom (generated once, like a spray-can burst bleeding in from the corners) ---------- */
+(function paintSpray(){
+  const c = $('#spray'), x = c.getContext('2d'), W = c.width, H = c.height;
+  const blooms = [[W*1.02, H*.32, 210], [W*-.05, H*.86, 190], [W*.95, H*.98, 150]];
+  const gauss = () => (Math.random()+Math.random()+Math.random()-1.5)/1.5;
+  for(const [cx, cy, r] of blooms){
+    const g = x.createRadialGradient(cx, cy, 0, cx, cy, r*1.25);
+    g.addColorStop(0, 'rgba(230,0,126,.75)'); g.addColorStop(.55, 'rgba(230,0,126,.25)'); g.addColorStop(1, 'rgba(230,0,126,0)');
+    x.fillStyle = g; x.fillRect(0,0,W,H);
+    for(let k=0;k<2600;k++){
+      const px = cx + gauss()*r*1.3, py = cy + gauss()*r*1.3;
+      const d = Math.hypot(px-cx, py-cy)/r;
+      x.globalAlpha = Math.max(0, .9 - d*.5) * Math.random();
+      x.fillStyle = Math.random() < .08 ? '#ff4fa8' : '#e6007e';
+      x.beginPath(); x.arc(px, py, Math.random() < .03 ? 2.5+Math.random()*3 : .4+Math.random()*1.2, 0, 7); x.fill();
+    }
+    x.globalAlpha = 1;
+  }
+})();
+
+/* ---------- screens ---------- */
+const show = (id, on) => $(id).hidden = !on;
+function setState(s){
+  state = s;
+  const idle = s==='idle';
+  show('#hero', idle); show('#filters', idle); show('#go', idle); show('#deco', idle);
+  show('#vf', s==='idle' || s==='count' || s==='rec');
+  $('#vf').classList.toggle('recording', s==='rec');
+  $('#vf').classList.toggle('live', s==='rec' || s==='count');
+  $('#vfMode').textContent = s==='rec' ? 'REC' : (S.filter ? CFG[S.filter].name : 'READY');
+  show('#logoTL', s!=='result');
+  show('#count', s==='count'); show('#prog', s==='proc');
+  show('#qr', s==='result'); show('#rbtns', s==='result');
+  clearTimeout(idleTimer);
+  if(s==='result') idleTimer = setTimeout(reset, 90000);       // back to start if nobody touches it
+}
+let idleTimer = null;
+function progress(txt, p, sub=''){ $('#progTxt').textContent = txt; $('#progBar').style.width = Math.round(p*100)+'%'; $('#progSub').textContent = sub; }
+function reset(){ outFrames = []; S.filter = null; document.querySelectorAll('.fbtn').forEach(b=>b.setAttribute('aria-pressed', false)); $('#go').disabled = true; setState('idle'); }
+
+/* ---------- live preview / playback / timecode ---------- */
+let playI = 0, playT = 0, recT0 = 0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(state==='result' && outFrames.length){
+    const f = outFrames[playI];
+    if(t - playT >= f.ms){ playT = t; vctx.drawImage(f.b, 0, 0); playI = (playI+1) % outFrames.length; }
+  } else if(state!=='proc' && video.readyState >= 2){
+    drawSrc(vctx);
+  }
+  const ms = state==='rec' ? performance.now()-recT0 : 0;
+  const f2 = n => String(Math.floor(n)).padStart(2,'0');
+  $('#tc').textContent = `${f2(ms/60000)}:${f2(ms/1000%60)}:${f2(ms/1000*30%30)}`;
+}
+function drawSrc(c){
+  const vw = video.videoWidth, vh = video.videoHeight; if(!vw) return;
+  const side = S.rot !== 0, rw = side ? vh : vw, rh = side ? vw : vh;
+  const sc = Math.max(CW/rw, CH/rh);
+  c.save(); c.fillStyle='#000'; c.fillRect(0,0,CW,CH);
+  c.translate(CW/2, CH/2);
+  if(mirror && video.srcObject) c.scale(-1,1);
+  c.rotate(S.rot*Math.PI/180);
+  c.drawImage(video, -vw*sc/2, -vh*sc/2, vw*sc, vh*sc);
+  c.restore();
+}
+requestAnimationFrame(loop);
+
+/* ---------- source ---------- */
+async function openCam(){
+  try{
+    const st = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720,frameRate:30}, audio:false});
+    video.srcObject = st; video.loop = false; await video.play();
+  }catch(e){ $('#vfMode').textContent = 'ΧΩΡΙΣ ΚΑΜΕΡΑ'; }
+}
+$('#cam').onclick = openCam;
+$('#file').onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject = null; }
+  video.src = URL.createObjectURL(f); video.loop = true; await video.play();
+};
+openCam();
+
+/* ---------- capture ---------- */
+const grabC = mk(CW, CH);
+async function capture(){
+  setState('count');
+  for(const n of [3,2,1]){ $('#count').textContent = n; await wait(800); }
+  setState('rec'); recT0 = performance.now();
+  const g = grabC.getContext('2d');
+  if(!video.srcObject) video.currentTime = 0;
+  const pend = [];
+  await new Promise(done => {
+    const useRVFC = 'requestVideoFrameCallback' in video;
+    const grab = () => {
+      if(performance.now() - recT0 >= S.dur*1000) return done();
+      drawSrc(g); pend.push(createImageBitmap(grabC));
+      useRVFC ? video.requestVideoFrameCallback(grab) : requestAnimationFrame(grab);
+    };
+    grab();
+  });
+  frames = await Promise.all(pend);
+  capFps = frames.length / S.dur;
+  await processAll(true);
+}
+
+/* ---------- RVM matting (CPU / WASM, local model) ---------- */
+let rvm = null, rvmState = null;
+const loadScript = src => new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => no(new Error('δεν φόρτωσε ' + src)); document.head.appendChild(s); });
+async function loadRVM(){
+  if(rvm) return rvm;
+  progress('Ζεσταίνεται…', 0);
+  if(!window.ort) await loadScript('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js');
+  ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/';
+  if(!window.RVM_B64) await loadScript('rvm_model.js');
+  const bin = atob(window.RVM_B64), bytes = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+  rvm = await ort.InferenceSession.create(bytes, {executionProviders:['wasm']});
+  return rvm;
+}
+function rvmReset(){ const z = () => new ort.Tensor('float32', new Float32Array(1), [1,1,1,1]); rvmState = {r1:z(), r2:z(), r3:z(), r4:z()}; }
+async function rvmAlpha(canvas){
+  const w = canvas.width, h = canvas.height;
+  const px = canvas.getContext('2d').getImageData(0,0,w,h).data, n = w*h, src = new Float32Array(3*n);
+  for(let i=0;i<n;i++){ src[i]=px[i*4]/255; src[n+i]=px[i*4+1]/255; src[2*n+i]=px[i*4+2]/255; }
+  const ratio = ({256:.35, 384:.5, 512:.7})[S.res] || .5;
+  const r = await rvm.run({
+    src: new ort.Tensor('float32', src, [1,3,h,w]),
+    r1i: rvmState.r1, r2i: rvmState.r2, r3i: rvmState.r3, r4i: rvmState.r4,
+    downsample_ratio: new ort.Tensor('float32', new Float32Array([ratio]), [1])
+  });
+  rvmState = {r1:r.r1o, r2:r.r2o, r3:r.r3o, r4:r.r4o};
+  const d = r.pha.dims;
+  return {w:d[3], h:d[2], a: Float32Array.from(r.pha.data)};
+}
+
+// only these filters cut the player out; Earthquake and RGB work on the whole frame (no matting → fast)
+const NEEDS_MASK = {ghost:true, sticker:true, flame:true, quake:true};
+async function processAll(newClip){
+  if(!frames.length) return;
+  setState('proc');
+  const t0 = performance.now();
+  if(newClip) alphas = [];
+  const segment = NEEDS_MASK[S.filter] && !alphas.length;
+  if(segment){
+    try{ await loadRVM(); }catch(e){ progress('Κάτι δεν πήγε καλά', 0, e.message); return; }
+    alphas = []; rvmReset();
+    const work = mk(CW, CH), w = work.getContext('2d', {willReadFrequently:true});
+    w.drawImage(frames[0],0,0); for(let k=0;k<3;k++) await rvmAlpha(work);
+    const ts = performance.now();
+    for(let i=0;i<frames.length;i++){
+      w.drawImage(frames[i],0,0);
+      alphas.push(await rvmAlpha(work));
+      progress('Γίνεσαι viral…', (i+1)/frames.length*.75, `${i+1}/${frames.length} · ${((performance.now()-ts)/(i+1)).toFixed(0)} ms/frame`);
+      await wait(0);
+    }
+  }
+  await composeAll(segment ? .75 : 0);
+  $('#progSub').textContent = `επεξεργασία ${((performance.now()-t0)/1000).toFixed(1)}s`;
+  makeQR();
+  playI = 0; setState('result');
+}
+
+/* ---------- QR (placeholder link in this demo) ---------- */
+function makeQR(){
+  const id = Math.random().toString(36).slice(2,8);
+  const url = `https://thebrightcollective.gr/streetball-scoreboard/v/${id}`;
+  try{
+    const q = qrcode(0, 'M'); q.addData(url); q.make();
+    $('#qrbox').innerHTML = q.createSvgTag({cellSize:4, margin:0});
+  }catch(e){ $('#qrbox').textContent = url; }
+}
+
+/* ---------- shared helpers ---------- */
+function maskCanvases(){
+  const out = []; let prev = null;
+  for(const m of alphas){
+    const a = new Float32Array(m.a.length), k = prev ? S.temporal : 0;
+    for(let i=0;i<a.length;i++) a[i] = m.a[i]*(1-k) + (k ? prev[i]*k : 0);
+    prev = a;
+    const c = mk(m.w, m.h), x = c.getContext('2d'), id = x.createImageData(m.w, m.h);
+    const lo = S.choke, hi = Math.min(1, S.choke + .5);
+    for(let i=0;i<a.length;i++){ let v=(a[i]-lo)/(hi-lo); v=v<0?0:v>1?1:v; id.data[i*4+3]=v*v*(3-2*v)*255; }
+    x.putImageData(id,0,0); out.push(c);
+  }
+  return out;
+}
+// freeze point = frame with the most movement (silhouette change if we have masks, else pixel change)
+function peakFrame(){
+  let series = alphas.length ? alphas.map(m => m.a) : null;
+  if(!series){
+    const s = mk(36, 64), x = s.getContext('2d', {willReadFrequently:true});
+    series = frames.map(f => { x.drawImage(f,0,0,36,64); const d = x.getImageData(0,0,36,64).data, g = new Float32Array(36*64); for(let p=0;p<g.length;p++) g[p] = (d[p*4]+d[p*4+1]+d[p*4+2])/765; return g; });
+  }
+  let best = Math.floor(frames.length*.6), bestV = -1;
+  for(let i=Math.max(1, Math.floor(frames.length*.3)); i<series.length; i++){
+    const A = series[i], B = series[i-1]; let v = 0;
+    for(let j=0;j<A.length;j+=(alphas.length?7:1)) v += Math.abs(A[j]-B[j]);
+    if(v > bestV){ bestV = v; best = i; }
+  }
+  return best;
+}
+// whole frame mapped to one brand colour (shadows dark, lights → colour)
+function tintFull(frame, color){
+  const c = mk(CW,CH), x = c.getContext('2d');
+  x.filter='grayscale(1) contrast(1.35) brightness(1.15)'; x.drawImage(frame,0,0); x.filter='none';
+  x.globalCompositeOperation='multiply'; x.fillStyle=color; x.fillRect(0,0,CW,CH);
+  return c;
+}
+function cutOf(frame, mask){
+  const c = mk(CW,CH), x = c.getContext('2d');
+  x.drawImage(frame,0,0);
+  x.globalCompositeOperation='destination-in';
+  x.filter = S.feather ? `blur(${S.feather}px)` : 'none';
+  x.drawImage(mask,0,0,CW,CH);
+  return c;
+}
+function ringOf(mask, px, color){
+  const c = mk(CW,CH), x = c.getContext('2d');
+  x.filter=`blur(${px}px)`; for(let k=0;k<5;k++) x.drawImage(mask,0,0,CW,CH); x.filter='none';
+  x.globalCompositeOperation='source-in'; x.fillStyle=color; x.fillRect(0,0,CW,CH);
+  x.globalCompositeOperation='destination-out'; x.drawImage(mask,0,0,CW,CH);
+  return c;
+}
+function duoOf(cut, color){
+  const c = mk(CW,CH), x = c.getContext('2d');
+  x.filter='grayscale(1) contrast(1.5) brightness(1.6)'; x.drawImage(cut,0,0); x.filter='none';
+  if(color !== WHITE){ x.globalCompositeOperation='multiply'; x.fillStyle=color; x.fillRect(0,0,CW,CH); }
+  x.globalCompositeOperation='destination-in'; x.drawImage(cut,0,0);
+  return c;
+}
+function silOf(mask, color){
+  const c = mk(CW,CH), x = c.getContext('2d');
+  x.drawImage(mask,0,0,CW,CH); x.globalCompositeOperation='source-in'; x.fillStyle=color; x.fillRect(0,0,CW,CH);
+  return c;
+}
+const rnd = n => { const s = Math.sin(n*12.9898 + 78.233)*43758.5453; return s - Math.floor(s); };
+const srnd = n => rnd(n)*2 - 1;
+function drawT(o, img, dx, dy, rot, sc, alpha=1, op='source-over'){
+  o.save(); o.globalAlpha = alpha; o.globalCompositeOperation = op;
+  o.translate(CW/2+dx, CH/2+dy); o.rotate(rot); o.scale(sc, sc);
+  o.drawImage(img, -CW/2, -CH/2);
+  o.restore();
+}
+function drawBW(o, frame, dx=0, dy=0, rot=0, sc=1){
+  o.save(); o.filter='grayscale(1) contrast(1.3) brightness(.45)';
+  o.translate(CW/2+dx, CH/2+dy); o.rotate(rot); o.scale(sc, sc);
+  o.drawImage(frame, -CW/2, -CH/2); o.restore();
+}
+function drawPlayer(o, cut){ o.filter='contrast(1.15) saturate(1.3) brightness(1.1)'; o.drawImage(cut,0,0); o.filter='none'; }
+function burnLogo(o){
+  if(!logoImg.complete || !logoImg.naturalWidth) return;
+  const w = CW*.3, h = w*logoImg.naturalHeight/logoImg.naturalWidth;
+  o.drawImage(logoImg, (CW-w)/2, CH-h-CH*.025, w, h);
+}
+
+/* ---------- compose ---------- */
+async function composeAll(p0){
+  const useMask = NEEDS_MASK[S.filter];
+  const masks = useMask ? maskCanvases() : [];
+  const N = frames.length;
+  const cuts = [], rings = [];
+  if(useMask) for(let i=0;i<N;i++){
+    cuts.push(cutOf(frames[i], masks[i]));
+    if(S.filter!=='sticker') rings.push(ringOf(masks[i], 4, MAG));
+    if(i%8===0){ progress('Γίνεσαι viral…', p0 + (i+1)/N*(1-p0)*.3); await wait(0); }
+  }
+  const X = {masks, cuts, rings, N, cache:{}};
+  const freeze = S.freezeMode==='on' || (S.freezeMode==='auto' && CFG[S.filter].freeze);
+  const tl = [];
+  const vidMs = 1000/capFps/S.speed, fxMs = 1000/30;
+  if(freeze){
+    const fp = peakFrame();
+    for(let i=0;i<fp;i++) tl.push({i, t:-1, ms:vidMs});
+    for(let k=0;k<S.hold;k++) tl.push({i:fp, t:k, ms:fxMs, freeze:true});
+  } else if(CFG[S.filter].slow){
+    // strong, smooth slow motion: n in-between frames per captured frame, played at normal rate
+    const n = CFG[S.filter].slow; let k = 0;
+    for(let i=0;i<N-1;i++) for(let s=0;s<n;s++) tl.push({i, frac:s/n, t:k++, ms:1000/capFps, freeze:false});
+  } else {
+    for(let i=0;i<N;i++) tl.push({i, t:i, ms:vidMs, freeze:false});
+  }
+  if(S.filter==='ghost') X.ghost = ghostState();
+  if(S.filter==='flame') X.fire = fireState();
+  const out = mk(CW,CH), o = out.getContext('2d');
+  outFrames = [];
+  for(let k=0;k<tl.length;k++){
+    const e = tl[k];
+    o.setTransform(1,0,0,1,0,0); o.globalAlpha=1; o.globalCompositeOperation='source-over'; o.filter='none';
+    o.fillStyle='#000'; o.fillRect(0,0,CW,CH);
+    if(e.t < 0) renderPlain(o, X, e);
+    else ({ghost:renderGhost, quake:renderQuake, rgb:renderRGB, sticker:renderSticker, flame:renderFlame})[S.filter](o, X, e);
+    burnLogo(o);
+    outFrames.push({b: await createImageBitmap(out), ms: e.ms});
+    if(k%4===0){ progress('Γίνεσαι viral…', p0 + (1-p0)*(.3 + .7*(k+1)/tl.length)); await wait(0); }
+  }
+}
+function renderPlain(o, X, e){
+  if(S.filter==='sticker') return renderSticker(o, X, {...e, t:0, calm:true});
+  if(S.filter==='flame') return renderFlame(o, X, {...e, t:e.i});
+  if(S.filter==='ghost'){ drawBW(o, frames[e.i]); o.drawImage(X.rings[e.i],0,0); drawPlayer(o, X.cuts[e.i]); return; }
+  o.drawImage(frames[e.i],0,0);                       // quake / rgb: untouched colour video until the hit
+}
+
+/* 0 · GHOST ECHO — approved look (ghost-echo-v1-LOCKED): solid magenta silhouettes behind the player,
+   6 copies every 3 frames, stepped opacity 95% → 6%, no overlap build-up, magenta stroke */
+function ghostState(){ return {buf:[], cov:mk(CW,CH), lay:mk(CW,CH), fx:mk(CW,CH)}; }
+function renderGhost(o, X, e){
+  const G = X.ghost, i = e.i, COUNT = 6, GAP = 3, OP = .95, OPMIN = .06;
+  if(G.buf.length <= i) G.buf[i] = silOf(X.masks[i], MAG);
+  const fx = G.fx.getContext('2d'), cv = G.cov.getContext('2d'), ly = G.lay.getContext('2d');
+  fx.globalCompositeOperation='source-over'; fx.clearRect(0,0,CW,CH); cv.clearRect(0,0,CW,CH);
+  const fall = Math.pow(OPMIN/OP, 1/(COUNT-1));
+  for(let g=1; g<=COUNT; g++){
+    const j = i - g*GAP; if(j < 0) continue;
+    const sil = G.buf[j] || (G.buf[j] = silOf(X.masks[j], MAG));
+    ly.globalCompositeOperation='source-over'; ly.clearRect(0,0,CW,CH); ly.drawImage(sil,0,0);
+    ly.globalCompositeOperation='destination-out'; ly.drawImage(G.cov,0,0);
+    fx.globalAlpha = OP*Math.pow(fall, g-1); fx.drawImage(G.lay,0,0);
+    cv.drawImage(sil,0,0);
+  }
+  fx.globalAlpha=1;
+  fx.globalCompositeOperation='destination-out';
+  fx.filter='blur(4px)'; fx.drawImage(X.masks[i],0,0,CW,CH); fx.drawImage(X.masks[i],0,0,CW,CH); fx.filter='none';
+  fx.globalCompositeOperation='source-over';
+  drawBW(o, frames[i]);
+  o.drawImage(G.fx,0,0);
+  o.drawImage(X.rings[i],0,0);
+  drawPlayer(o, X.cuts[i]);
+}
+
+/* 1 · EARTHQUAKE ECHO */
+function shake(t, freeze){
+  const I = S.intensity;
+  const amp = freeze ? I*34*Math.exp(-t/14) + I*3 : I*(6 + 22*Math.exp(-(t%18)/5));
+  return {x: srnd(t*1.7)*amp, y: srnd(t*2.3+9)*amp*.8, r: srnd(t*3.1+4)*amp*.0022};
+}
+/* at the hit: background turns magenta, the event's black basketballs pop in around the player,
+   and the whole picture shakes, leaving see-through copies of itself at its past positions */
+const BALLS = (window.BALL_URIS || []).map(u => { const im = new Image(); im.src = u; return im; });
+const BALL_SPOTS = [ {x:.17,y:.27,s:.34,b:0,r:.3}, {x:.84,y:.44,s:.27,b:1,r:-.5}, {x:.22,y:.70,s:.22,b:1,r:.9}, {x:.80,y:.15,s:.19,b:0,r:-.2} ];
+function quakeLayer(X, i, t){
+  const L = X.qL || (X.qL = mk(CW,CH)), x = L.getContext('2d'), I = S.intensity;
+  x.globalAlpha = 1; x.globalCompositeOperation = 'source-over';
+  x.drawImage(frames[i],0,0);
+  x.globalCompositeOperation = 'color'; x.fillStyle = MAG; x.fillRect(0,0,CW,CH);          // magenta tone, keeps light/shadow
+  x.globalCompositeOperation = 'overlay'; x.globalAlpha = .45; x.fillRect(0,0,CW,CH);
+  x.globalAlpha = 1; x.globalCompositeOperation = 'source-over';
+  BALL_SPOTS.forEach((b, k) => {
+    const img = BALLS[b.b]; if(!img || !img.complete || !img.naturalWidth) return;
+    const tt = t - k*2; if(tt < 0) return;                                                 // staggered pop-in
+    const pop = Math.min(1, tt/3) * (1 + .3*Math.exp(-tt/4)*Math.cos(tt*.8));
+    const w = CW*b.s*pop, dx = srnd(t*1.9+k*7)*6*I, dy = srnd(t*2.7+k*3)*6*I;
+    x.save(); x.translate(CW*b.x + dx, CH*b.y + dy); x.rotate(b.r + t*.03*(k%2 ? -1 : 1));
+    x.shadowColor = 'rgba(0,0,0,.55)'; x.shadowBlur = 18; x.shadowOffsetY = 10;
+    x.drawImage(img, -w/2, -w/2, w, w); x.restore();
+  });
+  x.drawImage(X.cuts[i],0,0);                                                              // player stays in colour
+  return L;
+}
+function renderQuake(o, X, e){
+  const t = e.t, fr = e.freeze;
+  const zoom = 1.1 * (fr ? 1 + .1*S.intensity*Math.exp(-t/5) : 1);     // slight zoom so the edges never show
+  const LAG = 2, COPIES = 4;
+  // oldest copy is the opaque base, every newer copy goes on top half see-through → stacked echoes
+  for(let j=COPIES; j>=0; j--){
+    const src = fr ? e.i : Math.max(0, e.i - j*LAG);
+    const ps = shake(Math.max(0, t - j*LAG), fr);
+    drawT(o, quakeLayer(X, src, t), ps.x, ps.y, ps.r, zoom, j===COPIES ? 1 : (j===0 ? .62 : .45));
+  }
+}
+
+/* 2 · RGB GHOST (brand colours) */
+/* whole colour frame + two ghost copies in magenta and red that split off sideways (and trail in time) */
+// in-between frame for smooth slow motion (cross-fade of two captured frames)
+function frameAt(i, frac, slot){
+  const c = slot, x = c.getContext('2d');
+  x.globalAlpha = 1; x.drawImage(frames[i],0,0);
+  if(frac > 0 && frames[i+1]){ x.globalAlpha = frac; x.drawImage(frames[i+1],0,0); x.globalAlpha = 1; }
+  return c;
+}
+function renderRGB(o, X, e){
+  const t = e.t, I = S.intensity, f = e.frac || 0;
+  X.slots = X.slots || [mk(CW,CH), mk(CW,CH), mk(CW,CH)];
+  const ramp = Math.min(1, t/8);                                         // effect is on from the first frames
+  const r = I*13*ramp*(.75 + .25*Math.sin(t*.22));
+  o.drawImage(frameAt(e.i, f, X.slots[0]),0,0);
+  [[MAG, -1, 3], [RED, 1, 6]].forEach(([col, dir, lag], k) => {
+    const src = frameAt(Math.max(0, e.i - lag), f, X.slots[k+1]);
+    drawT(o, tintFull(src, col), dir*r, dir*r*.15, 0, 1.03, .6, 'screen');
+  });
+}
+
+/* 3 · JITTERY STICKER */
+/* colour video until the hit; then the background drops to B&W and the player (in colour, no border)
+   jumps around "on threes" with a drop shadow and a pop-in bounce */
+function renderSticker(o, X, e){
+  const t = e.t, fr = e.freeze, I = S.intensity;
+  if(e.calm){ o.drawImage(frames[e.i],0,0); return; }
+  o.save(); o.filter = 'grayscale(1) contrast(1.15)'; o.drawImage(frames[e.i],0,0); o.restore();
+  const step = Math.floor(t/3) + 1;
+  const jx = srnd(step*1.3)*9*I, jy = srnd(step*2.1+5)*9*I, jr = srnd(step*3.7+2)*.05*I;
+  const sc = fr ? 1 + .22*I*Math.exp(-t/5)*Math.cos(t*.9) : 1;
+  const i = fr ? e.i : e.i - (e.i % 2);
+  o.save(); o.filter = 'brightness(0)'; drawT(o, X.cuts[i], jx+10, jy+14, jr, sc, .4); o.restore();
+  drawT(o, X.cuts[i], jx, jy, jr, sc);
+}
+
+/* 4 · FLAME OUTLINE — the player engulfed in dense, wispy fire (ref: "man on fire" photo-manip).
+   Procedural, CPU only: domain-warped fBm + ridged noise scrolling upwards, shaped by a field around the body.
+   Two layers: fire BEHIND the player (full) and fire IN FRONT along the body's edges, so he looks engulfed. */
+const FDIV = 1.5, FW = Math.round(CW/FDIV), FH = Math.round(CH/FDIV);
+const PERM = (() => { const a = [...Array(256).keys()]; let s = 1234567;
+  for(let i=255;i>0;i--){ s = (s*16807) % 2147483647; const j = s % (i+1); [a[i], a[j]] = [a[j], a[i]]; }
+  const p = new Uint8Array(512); for(let i=0;i<512;i++) p[i] = a[i & 255]; return p; })();
+function vnoise(x, y){
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, X = xi & 255, Y = yi & 255;
+  const a = PERM[PERM[X]+Y], b = PERM[PERM[X+1]+Y], c = PERM[PERM[X]+Y+1], d = PERM[PERM[X+1]+Y+1];
+  const u = xf*xf*(3-2*xf), v = yf*yf*(3-2*yf);
+  return ((a + (b-a)*u) + ((c + (d-c)*u) - (a + (b-a)*u))*v) / 255;
+}
+function fbm(x, y){ let s = 0, a = .5, f = 1; for(let o=0;o<4;o++){ s += a*vnoise(x*f, y*f); f *= 2.03; a *= .5; } return s/.9375; }
+const FLAME_LUTS = {};
+function flameLut(name){
+  if(FLAME_LUTS[name]) return FLAME_LUTS[name];
+  const stops = name==='natural'
+    ? [[0,[0,0,0,0]],[.12,[60,8,0,0]],[.28,[150,30,0,150]],[.45,[235,85,0,225]],[.62,[255,145,25,255]],[.8,[255,205,90,255]],[1,[255,250,225,255]]]
+    : [[0,[0,0,0,0]],[.12,[60,0,22,0]],[.28,[140,0,60,150]],[.45,[230,0,110,225]],[.62,[255,40,60,255]],[.8,[255,120,100,255]],[.92,[255,200,185,255]],[1,[255,250,240,255]]];
+  const lut = new Uint8ClampedArray(256*4);
+  for(let i=0;i<256;i++){
+    const v = i/255; let k = 0; while(k < stops.length-2 && v > stops[k+1][0]) k++;
+    const [a, ca] = stops[k], [b, cb] = stops[k+1], u = Math.min(1, Math.max(0, (v-a)/(b-a)));
+    for(let ch=0;ch<4;ch++) lut[i*4+ch] = ca[ch] + (cb[ch]-ca[ch])*u;
+  }
+  return FLAME_LUTS[name] = lut;
+}
+function fireState(){
+  const small = mk(FW, FH);
+  return {small, sx: small.getContext('2d', {willReadFrequently:true}),
+          back: new ImageData(FW, FH), front: new ImageData(FW, FH), backC: mk(FW, FH), frontC: mk(FW, FH),
+          fields: {}, lit: mk(CW, CH)};
+}
+// per frame: where fire may burn (around + above the body) and where it may cover the body (its edges)
+function fieldsOf(X, F, i){
+  if(F.fields[i]) return F.fields[i];
+  const x = F.sx, read = () => { const d = x.getImageData(0,0,FW,FH).data, a = new Float32Array(FW*FH); for(let p=0;p<a.length;p++) a[p] = d[p*4+3]/255; return a; };
+  x.clearRect(0,0,FW,FH); x.filter = `blur(${34/FDIV}px)`;
+  for(const [up, al] of [[0,1],[50,.95],[110,.8],[180,.55],[260,.3]]){ x.globalAlpha = al; for(let k=0;k<3;k++) x.drawImage(X.masks[i], 0, -up/FDIV, FW, FH); }
+  x.filter = 'none'; x.globalAlpha = 1;
+  const near = read();
+  x.clearRect(0,0,FW,FH); x.drawImage(X.masks[i], 0, 0, FW, FH);
+  const inside = read();
+  x.clearRect(0,0,FW,FH); x.filter = `blur(${16/FDIV}px)`; x.drawImage(ringOf(X.masks[i], 6, WHITE), 0, 0, FW, FH); x.filter = 'none';
+  const edge = read();
+  return F.fields[i] = {near, inside, edge};
+}
+function renderFlame(o, X, e){
+  const F = X.fire, i = e.i, t = e.t, I = S.intensity;
+  const {near, inside, edge} = fieldsOf(X, F, i);
+  const lut = flameLut(S.flamePal), B = F.back.data, Fr = F.front.data;
+  const T = t*.075;                                           // upward scroll speed (noise units per frame)
+  for(let y=0, p=0; y<FH; y++){
+    const ny = y/FH*3.6 + T;                                  // tall features: y frequency lower than x
+    for(let x=0; x<FW; x++, p++){
+      const n = near[p];
+      if(n < .02){ B[p*4+3] = 0; Fr[p*4+3] = 0; continue; }
+      const nx = x/FW*6.2;
+      const q = fbm(nx*.8, ny*.8 + T*.4);
+      const w = fbm(nx + 1.9*q, ny + 1.9*q + T*.6);
+      let r = 1 - Math.abs(2*fbm(nx*2.2 + q*1.3, ny*1.9 + T*1.7) - 1); r = r*r*r;   // thin bright wisps
+      let h = n * (w*.9 + r*.95) - .5;
+      h = h <= 0 ? 0 : Math.min(1, h*1.2*I);
+      const v = (h*255|0)*4;
+      B[p*4] = lut[v]; B[p*4+1] = lut[v+1]; B[p*4+2] = lut[v+2]; B[p*4+3] = lut[v+3];
+      // in front of the body: strong on the edges, a little over the inside (legs/torso licked by flames)
+      const fw = Math.min(1, edge[p]*1.2)*.5 * (1 - inside[p]*.85);   // flames lick the outline, barely cross onto the body
+      const hf = Math.min(1, h*fw*1.1), vf = (hf*255|0)*4;
+      Fr[p*4] = lut[vf]; Fr[p*4+1] = lut[vf+1]; Fr[p*4+2] = lut[vf+2]; Fr[p*4+3] = lut[vf+3];
+    }
+  }
+  F.backC.getContext('2d').putImageData(F.back, 0, 0);
+  F.frontC.getContext('2d').putImageData(F.front, 0, 0);
+  // dark scene, like the reference
+  o.save(); o.filter = 'grayscale(.7) brightness(.28) contrast(1.1)'; o.drawImage(frames[i],0,0); o.restore();
+  o.save(); o.globalCompositeOperation = 'screen';
+  o.filter = 'blur(22px)'; o.globalAlpha = .85; o.drawImage(F.backC,0,0,CW,CH);       // glow
+  o.filter = 'blur(.5px)'; o.globalAlpha = 1;  o.drawImage(F.backC,0,0,CW,CH);       // flames
+  o.restore();
+  // player lit by the fire (warm/brand light from below)
+  const L = F.lit, lx = L.getContext('2d');
+  lx.globalCompositeOperation = 'source-over'; lx.clearRect(0,0,CW,CH);
+  lx.filter = 'contrast(1.15) saturate(1.1)'; lx.drawImage(X.cuts[i],0,0); lx.filter = 'none';
+  const g = lx.createLinearGradient(0, CH, 0, 0);
+  const tone = S.flamePal==='natural' ? ['rgba(255,120,20,.16)','rgba(255,90,0,0)'] : ['rgba(255,30,90,.14)','rgba(230,0,126,0)'];   // light touch: keep his blacks clean
+  g.addColorStop(0, tone[0]); g.addColorStop(1, tone[1]);
+  lx.globalCompositeOperation = 'source-atop'; lx.fillStyle = g; lx.fillRect(0,0,CW,CH);   // tint only on top of the player
+  lx.globalCompositeOperation = 'source-over';
+  o.drawImage(L,0,0);
+  // flames licking over the body
+  o.save(); o.globalCompositeOperation = 'screen'; o.filter = 'blur(.5px)'; o.drawImage(F.frontC,0,0,CW,CH); o.restore();
+}
+
+/* ---------- save (demo only) ---------- */
+async function save(){
+  if(!outFrames.length) return;
+  const rec = new MediaRecorder(view.captureStream(30), {mimeType:'video/webm'});
+  const chunks = []; rec.ondataavailable = e => chunks.push(e.data);
+  playI = 0; rec.start();
+  await wait(outFrames.reduce((s,f)=>s+f.ms,0) + 200);
+  rec.stop(); await new Promise(r => rec.onstop = r);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(chunks, {type:'video/webm'}));
+  a.download = `luben-${S.filter}-${Date.now()}.webm`; a.click();
+}
+
+/* ---------- wiring ---------- */
+document.querySelectorAll('.fbtn').forEach(b => b.onclick = () => {
+  S.filter = b.dataset.f;
+  document.querySelectorAll('.fbtn').forEach(x => x.setAttribute('aria-pressed', x===b));
+  $('#go').disabled = false; $('#go').textContent = '● ΠΑΜΕ';
+  $('#vfMode').textContent = CFG[S.filter].name;
+});
+$('#go').onclick = () => { if(S.filter) capture(); };
+$('#again').onclick = () => { outFrames = []; setState('idle'); };
+$('#done').onclick = reset;
+$('#save').onclick = save;
+$('#same').onclick = () => { if(alphas.length && S.filter){ $('#panel').hidden = true; processAll(false); } };
+// no settings on screen; operator-only panel on the S key (camera rotation, capture length…)
+addEventListener('keydown', ev => { if(ev.key==='s' || ev.key==='S' || ev.key==='σ') $('#panel').hidden = !$('#panel').hidden; });
+
+function pick(group, fn){
+  group.addEventListener('click', e => {
+    const b = e.target.closest('button'); if(!b) return;
+    group.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x===b));
+    fn(b.dataset.v);
+  });
+}
+pick($('#freezes'), v => S.freezeMode = v);
+pick($('#rots'), v => S.rot = +v);
+pick($('#fpals'), v => S.flamePal = v);
+pick($('#durs'), v => S.dur = +v);
+pick($('#ress'), v => S.res = +v);
+const bind = (id, key, f, fmt) => {
+  const el = $('#'+id+'_r'), o = $('#o-'+id);
+  const up = () => { S[key] = f(+el.value); o.textContent = fmt(S[key]); };
+  el.oninput = up; up();
+};
+bind('intensity','intensity', v=>v/100, v=>Math.round(v*100)+'%');
+bind('hold','hold', v=>v, v=>(v/30).toFixed(1)+'s');
+setState('idle');
+// test hook: booth-v3.html?auto=quake picks the filter and records on its own
+const auto = new URLSearchParams(location.search).get('auto');
+if(auto && CFG[auto]) setTimeout(() => { document.querySelector(`.fbtn[data-f="${auto}"]`).click(); capture(); }, 1500);
+</script>
+</body>
+</html>
